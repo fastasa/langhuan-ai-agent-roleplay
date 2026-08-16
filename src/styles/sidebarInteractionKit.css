@@ -1,0 +1,42 @@
+.sidebar-interaction-row,
+.sidebar-interaction-header {
+  position: relative;
+  will-change: transform;
+}
+
+.sidebar-interaction-row,
+.sidebar-interaction-header,
+.sidebar-interaction-row *,
+.sidebar-interaction-header * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+.sidebar-interaction-dragging {
+  opacity: 0.64;
+}
+
+.sidebar-interaction-preview-shift {
+  transform: translateY(0);
+}
+
+.sidebar-reorder-move {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-reorder-enter-active,
+.sidebar-reorder-leave-active {
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.sidebar-reorder-enter-from,
+.sidebar-reorder-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.sidebar-reorder-leave-active {
+  position: absolute;
+  width: calc(100% - 8px);
+}

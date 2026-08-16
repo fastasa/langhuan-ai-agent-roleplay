@@ -1,0 +1,4 @@
+interface:
+  display_name: "关系提示编写"
+  short_description: "在星依写入关系提示前统一合法语法、谓词方向、证据边界与复诊闭环"
+  default_prompt: "使用 $relation-hint-authoring 在写入关系提示前核对合法谓词、方向、证据与完整替换规则。"

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="琅嬛 - AI聊天与时间管理应用" />
+  <link rel="icon" href="data:,">
+  <title>琅嬛</title>
+  <script>
+    // 首屏预挂：乐观读取本地夜间开关，避免暗色用户首屏闪白；正式真值=设置快照 applyTheme 覆盖
+    try {
+      if (localStorage.getItem('langhuan_dark_mode') === 'true') {
+        document.documentElement.setAttribute('data-theme', 'dark')
+      }
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

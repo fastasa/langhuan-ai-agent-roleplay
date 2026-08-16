@@ -1,0 +1,85 @@
+export function createUtilityModalState({
+  appState,
+  stores,
+  ticketOps,
+  tagOps,
+  transactionActions,
+  uiHelpers,
+  timerComposable,
+  notificationSupported,
+  notificationPermission,
+  requestNotificationPermission
+}: any) {
+  const safeNoop = () => {}
+  const safeFn = (fn: any) => (typeof fn === 'function' ? fn : safeNoop)
+
+  const actions = {
+    saveTicket: safeFn(ticketOps?.saveTicket),
+    deleteEditingTicket: safeFn(ticketOps?.deleteEditingTicket),
+    editCustomTag: safeFn(tagOps?.editCustomTag),
+    deleteCustomTag: safeFn(tagOps?.deleteCustomTag),
+    saveCustomTag: safeFn(tagOps?.saveCustomTag),
+    addTransaction: safeFn(transactionActions?.addTransaction),
+    addCategory: safeFn(ticketOps?.addCategory),
+    saveCategories: safeFn(ticketOps?.saveCategories),
+    handleConfirmClick: safeFn(uiHelpers?.handleConfirmClick),
+    handlePromptSubmit: safeFn(uiHelpers?.handlePromptSubmit),
+    closePromptDialog: safeFn(uiHelpers?.closePromptDialog),
+    confirmChatTransfer: safeFn(uiHelpers?.confirmChatTransfer),
+    closeChatTransferDialog: safeFn(uiHelpers?.closeChatTransferDialog),
+    requestNotificationPermission: safeFn(requestNotificationPermission)
+  }
+
+  return {
+    showAddTicket: appState.showAddTicket,
+    showEditTicket: appState.showEditTicket,
+    ticketForm: appState.ticketForm,
+    viewModel: {
+      get categories() { return stores.resourceStore.categories },
+      get money() { return stores.resourceStore.money },
+      get points() { return stores.resourceStore.points },
+      timerComposable
+    },
+    actions,
+    saveTicket: actions.saveTicket,
+    deleteEditingTicket: actions.deleteEditingTicket,
+    showTagManager: appState.showTagManager,
+    customTags: appState.customTags,
+    editCustomTag: actions.editCustomTag,
+    deleteCustomTag: actions.deleteCustomTag,
+    editingTagId: appState.editingTagId,
+    newTagName: appState.newTagName,
+    tagColorPresets: appState.tagColorPresets,
+    newTagColor: appState.newTagColor,
+    saveCustomTag: actions.saveCustomTag,
+    showSpendMoney: appState.showSpendMoney,
+    spendAmount: appState.spendAmount,
+    spendReason: appState.spendReason,
+    addTransaction: actions.addTransaction,
+    showBatchExchange: appState.showBatchExchange,
+    showBatchUse: appState.showBatchUse,
+    batchTicket: appState.batchTicket,
+    batchAmount: appState.batchAmount,
+    showCategoryEditor: appState.showCategoryEditor,
+    categoryEditList: appState.categoryEditList,
+    newCategoryName: appState.newCategoryName,
+    addCategory: actions.addCategory,
+    saveCategories: actions.saveCategories,
+    showConfirmDialog: appState.showConfirmDialog,
+    confirmDialog: appState.confirmDialog,
+    showClearChatContextDialog: appState.showClearChatContextDialog,
+    clearChatContextDialog: appState.clearChatContextDialog,
+    showPromptDialog: appState.showPromptDialog,
+    promptDialog: appState.promptDialog,
+    showChatTransferDialog: appState.showChatTransferDialog,
+    chatTransferDialog: appState.chatTransferDialog,
+    handleConfirmClick: actions.handleConfirmClick,
+    handlePromptSubmit: actions.handlePromptSubmit,
+    closePromptDialog: actions.closePromptDialog,
+    confirmChatTransfer: actions.confirmChatTransfer,
+    closeChatTransferDialog: actions.closeChatTransferDialog,
+    notificationSupported,
+    notificationPermission,
+    requestNotificationPermission: actions.requestNotificationPermission
+  }
+}

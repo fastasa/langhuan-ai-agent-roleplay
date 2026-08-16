@@ -1,0 +1,583 @@
+{
+  "fixtureId": "jingyu-recall-golden-samples-v0.1",
+  "fixtureVersion": 1,
+  "characterId": "char_1777803915751",
+  "characterName": "惊雨",
+  "sourceDesign": "docs/tmp/recall-score-calibration/2026-05-05_惊雨召回黄金样本设计.md",
+  "notes": [
+    "本 fixture 只验证召回链路是否拿到应拿上下文，不验证最终聊天回复。",
+    "当前惊雨安排字段为空，安排类样本只做负向防幻觉检查。"
+  ],
+  "samples": [
+    {
+      "sampleId": "JY-RG-001",
+      "title": "老人家书职业转折",
+      "coverage": "明确关键词 / 旧事件回忆 / 时间保留",
+      "input": "小雨还记得第一次帮那个老人写家书的事吗？那件事为什么对她那么重要？",
+      "recentHistory": ["我想听她讲一点真正改变过她的过去。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-05 19:30",
+        "location": "博瑞利尔三至五环邮局附近",
+        "weather": "小雨"
+      },
+      "intentSnapshotExpected": { "primary": "旧事件回忆", "secondary": "职业动机" },
+      "expectedRecallIds": [
+        "brain:trajectory:node:day_0088_03_12",
+        "brain:trajectory:node:month_88_03",
+        "brain:trajectory:node:year_88"
+      ],
+      "mustDirectIds": [
+        "brain:trajectory:node:day_0088_03_12"
+      ],
+      "acceptableRecallIds": [
+        "brain:experience",
+        "brain:abilities",
+        "brain:speaking_style",
+        "brain:trajectory:node:year_89"
+      ],
+      "expectedExpandIds": [
+        "brain:trajectory:node:year_88",
+        "brain:trajectory:node:month_88_03"
+      ],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:d4d7fa03-24a9-406e-8cf0-633e70ef6852",
+        "brain:cognition:node:fefe7567-d06e-4f5d-a18c-12fbecfbf886"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "应优先召回具体日节点，而不是只召回职业简介。",
+      "metricFocus": ["keyHitRate", "roundCost"]
+    },
+    {
+      "sampleId": "JY-RG-002",
+      "title": "草叶铜扣与斜挎包",
+      "coverage": "明确物件关键词 / 核心直入",
+      "input": "她衣服上那枚草叶形的小铜扣，还有那个旧斜挎包，对她来说是什么感觉？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-05 17:20",
+        "location": "邮局门口",
+        "weather": "阴雨"
+      },
+      "intentSnapshotExpected": { "primary": "物件细节", "secondary": "情感来源" },
+      "expectedRecallIds": ["brain:outfit"],
+      "mustDirectIds": [],
+      "acceptableRecallIds": ["brain:appearance", "brain:background", "brain:desc"],
+      "expectedExpandIds": [],
+      "expectedPendingIds": ["brain:outfit"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe",
+        "brain:trajectory:node:year_88"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "核心外观和穿着细节不应被轨迹或世界资料抢预算。",
+      "metricFocus": ["falsePositiveRate", "tokenCost"]
+    },
+    {
+      "sampleId": "JY-RG-003",
+      "title": "真正的学者触发退让",
+      "coverage": "抽象动机 / 性格根源 / 时间保留",
+      "input": "如果有人随口说“真正的学者才懂这个”，她为什么会一下子退开？",
+      "recentHistory": ["我刚才夸她字写得很漂亮。", "她好像没有完全相信自己配得上这个夸奖。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-05 20:10",
+        "location": "三至五环租住小屋",
+        "weather": "雨停"
+      },
+      "intentSnapshotExpected": { "primary": "抽象动机", "secondary": "自我价值 / 旧经历" },
+      "expectedRecallIds": [
+        "brain:personality",
+        "brain:background",
+        "brain:experience",
+        "brain:trajectory:node:year_79"
+      ],
+      "mustDirectIds": [
+        "brain:personality",
+        "brain:trajectory:node:year_79"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf",
+        "brain:cognition:node:b03887c5-ce88-4a78-816b-219fc9ed4d70",
+        "brain:cognition:node:e51a1d93-9d85-4c5b-b15f-247517211112"
+      ],
+      "expectedExpandIds": ["brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:93ee5bd4-4413-4c32-b4b7-ba02876d384c",
+        "brain:cognition:node:5b8fbf04-14dd-4ee1-95e2-fd4363cfcfd7"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "核心是教育中止和自卑，不是把大学体系全量直入。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-004",
+      "title": "贵重礼物与人情负担",
+      "coverage": "亲密关系反应 / 人情边界",
+      "input": "如果我突然送她一件很贵的礼物，她会高兴，还是会不安？",
+      "recentHistory": ["我想让她知道自己值得被好好对待。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-05 21:00",
+        "location": "三至五环街边",
+        "weather": "微雨"
+      },
+      "intentSnapshotExpected": { "primary": "关系反应", "secondary": "性格 / 背景" },
+      "expectedRecallIds": ["brain:background", "brain:personality", "brain:desc"],
+      "acceptableRecallIds": ["brain:outfit", "brain:trajectory:node:year_90"],
+      "expectedExpandIds": [],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:b926d0e1-98d1-4863-82e4-33ef23e1f8c7",
+        "brain:cognition:node:cc4bfce8-bba6-45a0-95bf-f3731c9a4e51"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "贵重礼物主要触发不安和欠人情。",
+      "metricFocus": ["keyHitRate", "falsePositiveRate"]
+    },
+    {
+      "sampleId": "JY-RG-005",
+      "title": "旧纸边练字",
+      "coverage": "明确关键词 / 习惯来源 / 时间保留",
+      "input": "她为什么那么舍不得旧纸边，还会把小事写在纸角上？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-06 09:00",
+        "location": "邮局一隅",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "经历来源", "secondary": "爱好 / 习惯" },
+      "expectedRecallIds": ["brain:hobbies", "brain:trajectory:node:year_73", "brain:trajectory:node:year_80"],
+      "acceptableRecallIds": ["brain:abilities", "brain:background", "brain:trajectory:node:day_0067_05_01"],
+      "expectedExpandIds": ["brain:trajectory:node:year_73", "brain:trajectory:node:year_80"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:f3d3cbf4-ebbe-491f-b77d-439e51b0998e",
+        "brain:cognition:node:4d77b94c-8962-47ae-8599-24d50ea755bb"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "旧纸边同时命中爱好和童年识字习惯。",
+      "metricFocus": ["keyHitRate", "roundCost"]
+    },
+    {
+      "sampleId": "JY-RG-006",
+      "title": "离乡后为什么更谨慎",
+      "coverage": "关系变化追问 / 旧经历 / 时间链",
+      "input": "从离开乡下到在三至五环站稳，她到底是哪一步开始变得这么谨慎的？",
+      "recentHistory": ["她刚刚没有反驳，只是把手指攥紧了。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-06 18:00",
+        "location": "博瑞利尔三至五环",
+        "weather": "阴"
+      },
+      "intentSnapshotExpected": { "primary": "变化追问", "secondary": "经历 / 性格" },
+      "expectedRecallIds": [
+        "brain:trajectory:node:year_85",
+        "brain:trajectory:node:year_86",
+        "brain:background",
+        "brain:personality"
+      ],
+      "acceptableRecallIds": [
+        "brain:trajectory:node:year_90",
+        "brain:worldview",
+        "brain:cognition:node:6733b100-4734-4f31-bb87-f30739003d41"
+      ],
+      "expectedExpandIds": ["brain:trajectory:node:year_85", "brain:trajectory:node:year_86"],
+      "forbiddenRecallIds": ["brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe"],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "问题核心是性格变化由哪些经历造成。",
+      "metricFocus": ["keyHitRate", "tokenCost"]
+    },
+    {
+      "sampleId": "JY-RG-007",
+      "title": "二十四岁当前状态",
+      "coverage": "当前状态 / 时间意图 / 空安排防幻觉",
+      "input": "现在二十四岁的她，一天结束后通常会怎么过？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-06 22:00",
+        "location": "三至五环租住小屋",
+        "weather": "夜雨"
+      },
+      "intentSnapshotExpected": { "primary": "当前状态", "secondary": "日常生活" },
+      "expectedRecallIds": ["brain:trajectory:node:year_91", "brain:trajectory:node:year_90", "brain:desc"],
+      "acceptableRecallIds": ["brain:hobbies", "brain:background"],
+      "expectedExpandIds": ["brain:trajectory:node:year_91"],
+      "forbiddenRecallIds": [
+        "brain:arrangement:daily",
+        "brain:arrangement:yearly",
+        "brain:arrangement:current"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "当前无安排卡，不能编造行程。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-008",
+      "title": "教育结构展开",
+      "coverage": "粗父摘要 / 代表子项 / 教育结构展开",
+      "input": "惊雨为什么没能继续读专精学院？启蒙学舍到专精学院之间到底差了什么？",
+      "recentHistory": ["我有点分不清她说的学舍、学院和大学。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 10:00",
+        "location": "邮局柜台",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "设定解释", "secondary": "角色经历" },
+      "expectedRecallIds": [
+        "brain:trajectory:node:year_79",
+        "brain:experience",
+        "brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf",
+        "brain:cognition:node:96011be7-4068-4b3f-81c0-e62d330136c8",
+        "brain:cognition:node:e51a1d93-9d85-4c5b-b15f-247517211112",
+        "brain:cognition:node:b03887c5-ce88-4a78-816b-219fc9ed4d70"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:b87482f7-1d8a-413b-b3c7-b543d1df487e",
+        "brain:cognition:node:8b2293c3-5864-4c14-b34e-d6e02fa2cfea"
+      ],
+      "expectedExpandIds": [
+        "brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf",
+        "brain:cognition:node:96011be7-4068-4b3f-81c0-e62d330136c8"
+      ],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:d4d7fa03-24a9-406e-8cf0-633e70ef6852",
+        "brain:cognition:node:93ee5bd4-4413-4c32-b4b7-ba02876d384c"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "父级教育体系必须展开，不能只用父摘要。",
+      "metricFocus": ["keyHitRate", "roundCost", "tokenCost"]
+    },
+    {
+      "sampleId": "JY-RG-009",
+      "title": "无司能与人生路径",
+      "coverage": "关系一跳 / 规则概念辅助 / 高相似干扰",
+      "input": "她没有觉醒明确司能，这件事是不是影响了她后来只能做书写员？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 13:00",
+        "location": "邮局后室",
+        "weather": "阴"
+      },
+      "intentSnapshotExpected": { "primary": "因果追问", "secondary": "能力 / 教育制度" },
+      "expectedRecallIds": [
+        "brain:abilities",
+        "brain:trajectory:node:year_79",
+        "brain:cognition:node:bc3cbfcd-d99c-483f-8c48-a833da1cf1d0",
+        "brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf",
+        "brain:cognition:node:b03887c5-ce88-4a78-816b-219fc9ed4d70"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:a88b471b-839c-42e1-b00c-e47cc60ce700",
+        "brain:cognition:node:e51a1d93-9d85-4c5b-b15f-247517211112",
+        "brain:experience"
+      ],
+      "expectedExpandIds": [
+        "brain:cognition:node:bc3cbfcd-d99c-483f-8c48-a833da1cf1d0",
+        "brain:cognition:node:fc4a5295-100e-4f15-b577-fb0ca61d2fcf"
+      ],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:152b0d73-d2f7-4401-af21-ef49dc636ebd",
+        "brain:cognition:node:fd735a41-fd4f-4f16-a527-1634f1f517e5"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "司能概念可辅助，肺能和星院不能高直入。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-010",
+      "title": "大学士高相似干扰",
+      "coverage": "高相似干扰 / 角色事实优先",
+      "input": "她是不是会觉得自己配不上大学士那种知识世界？",
+      "recentHistory": ["我刚才提到想带她去听一个公开讲座。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 15:00",
+        "location": "博瑞利尔街边",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "自我价值", "secondary": "学术阶层" },
+      "expectedRecallIds": [
+        "brain:personality",
+        "brain:background",
+        "brain:experience",
+        "brain:trajectory:node:year_79"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:d4d7fa03-24a9-406e-8cf0-633e70ef6852",
+        "brain:cognition:node:b926d0e1-98d1-4863-82e4-33ef23e1f8c7"
+      ],
+      "expectedExpandIds": ["brain:cognition:node:d4d7fa03-24a9-406e-8cf0-633e70ef6852"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:93ee5bd4-4413-4c32-b4b7-ba02876d384c",
+        "brain:cognition:node:32a53561-279c-4601-a212-378f2a878a0b",
+        "brain:cognition:node:5b8fbf04-14dd-4ee1-95e2-fd4363cfcfd7"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "大学士是社会对照，不是主要问题。",
+      "metricFocus": ["falsePositiveRate", "keyHitRate"]
+    },
+    {
+      "sampleId": "JY-RG-011",
+      "title": "三至五环位置语境",
+      "coverage": "世界资料 / 角色位置结合",
+      "input": "她总说自己在三至五环之间，那是博瑞利尔什么样的地方？为什么她会在那里？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 16:00",
+        "location": "博瑞利尔三至五环",
+        "weather": "多云"
+      },
+      "intentSnapshotExpected": { "primary": "地点设定", "secondary": "角色处境" },
+      "expectedRecallIds": [
+        "brain:cognition:node:6733b100-4734-4f31-bb87-f30739003d41",
+        "brain:cognition:node:77935863-5c51-45b1-aea5-12fb9b2581e1",
+        "brain:worldview",
+        "brain:desc",
+        "brain:trajectory:node:year_90"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:cbe6e168-c76a-41f1-8ccf-dda9c12d125d",
+        "brain:background"
+      ],
+      "expectedExpandIds": ["brain:cognition:node:6733b100-4734-4f31-bb87-f30739003d41"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:cc4bfce8-bba6-45a0-95bf-f3731c9a4e51",
+        "brain:cognition:node:0d656d7e-1b5b-48a7-a288-6d223e4745a9"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "城市结构和角色处境都应进入候选。",
+      "metricFocus": ["keyHitRate", "tokenCost"]
+    },
+    {
+      "sampleId": "JY-RG-012",
+      "title": "亚什基诺世界结构",
+      "coverage": "世界结构资料 / 角色资料降权",
+      "input": "亚什基诺到底是几块大陆、几片海？这个世界为什么显得这么隔绝？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 16:30",
+        "location": "邮局休息区",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "世界设定", "secondary": "地理结构" },
+      "expectedRecallIds": [
+        "brain:cognition:node:6e664090-bb79-45e2-90b9-da0d471d2957",
+        "brain:cognition:node:fefe7567-d06e-4f5d-a18c-12fbecfbf886",
+        "brain:cognition:node:0d656d7e-1b5b-48a7-a288-6d223e4745a9",
+        "brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe"
+      ],
+      "acceptableRecallIds": ["brain:worldview"],
+      "expectedExpandIds": [
+        "brain:cognition:node:6e664090-bb79-45e2-90b9-da0d471d2957",
+        "brain:cognition:node:fefe7567-d06e-4f5d-a18c-12fbecfbf886"
+      ],
+      "forbiddenRecallIds": [
+        "brain:outfit",
+        "brain:trajectory:node:day_0088_03_12"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "确认世界资料可召回，角色核心不应被强行高直入。",
+      "metricFocus": ["falsePositiveRate", "tokenCost"]
+    },
+    {
+      "sampleId": "JY-RG-013",
+      "title": "魔法与司能边界",
+      "coverage": "禁魔边界 / 无司能 / 概念干扰",
+      "input": "她以后会不会突然觉醒魔法、灵气或者空间能力？这世界有这类东西吗？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 17:00",
+        "location": "邮局柜台",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "规则边界", "secondary": "能力设定" },
+      "expectedRecallIds": [
+        "brain:abilities",
+        "brain:cognition:node:6e664090-bb79-45e2-90b9-da0d471d2957",
+        "brain:cognition:node:bc3cbfcd-d99c-483f-8c48-a833da1cf1d0"
+      ],
+      "acceptableRecallIds": ["brain:cognition:node:b03887c5-ce88-4a78-816b-219fc9ed4d70"],
+      "expectedExpandIds": ["brain:cognition:node:e03dc9bf-ab3d-4717-af23-0fbf9d27cc2a"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:152b0d73-d2f7-4401-af21-ef49dc636ebd",
+        "brain:cognition:node:fd735a41-fd4f-4f16-a527-1634f1f517e5"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "同时问角色能力和世界规则，肺能只能低权辅助。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-014",
+      "title": "保密边界与说话方式",
+      "coverage": "说话风格 / 职业伦理 / 代写场景",
+      "input": "如果我追问她以前替别人写过什么秘密，她会怎么回应？",
+      "recentHistory": ["我有点好奇邮局里会不会有很多不能说的故事。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 18:20",
+        "location": "邮局柜台",
+        "weather": "小雨"
+      },
+      "intentSnapshotExpected": { "primary": "对话反应", "secondary": "职业边界" },
+      "expectedRecallIds": ["brain:speaking_style", "brain:personality", "brain:abilities"],
+      "acceptableRecallIds": ["brain:experience", "brain:trajectory:node:year_89"],
+      "expectedExpandIds": [],
+      "forbiddenRecallIds": [
+        "brain:trajectory:node:day_0088_03_12",
+        "brain:cognition:node:d4d7fa03-24a9-406e-8cf0-633e70ef6852"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "重点是保密边界和说话方式。",
+      "metricFocus": ["falsePositiveRate", "keyHitRate"]
+    },
+    {
+      "sampleId": "JY-RG-015",
+      "title": "长白山父级展开",
+      "coverage": "高复杂父级展开 / 代表子项 / 世界资料干扰控制",
+      "input": "长白山那边如果要旅行，最需要担心哪些自然危险？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 19:00",
+        "location": "博瑞利尔",
+        "weather": "晴"
+      },
+      "intentSnapshotExpected": { "primary": "地理风险", "secondary": "世界资料" },
+      "expectedRecallIds": [
+        "brain:cognition:node:cc4bfce8-bba6-45a0-95bf-f3731c9a4e51",
+        "brain:cognition:node:b3d3a174-3506-42b3-972c-b5a51e45294e",
+        "brain:cognition:node:e5aef52d-a28c-4203-b524-de2f5590b4ff",
+        "brain:cognition:node:350ca169-40d2-43fd-94e1-f9960bfa7f66"
+      ],
+      "acceptableRecallIds": [
+        "brain:cognition:node:6f71dce5-57ce-4966-9c72-bc06c12bfb37",
+        "brain:cognition:node:932fd3f0-81ef-4631-a126-e724dc496b36"
+      ],
+      "expectedExpandIds": [
+        "brain:cognition:node:cc4bfce8-bba6-45a0-95bf-f3731c9a4e51",
+        "brain:cognition:node:b3d3a174-3506-42b3-972c-b5a51e45294e"
+      ],
+      "forbiddenRecallIds": [
+        "brain:outfit",
+        "brain:trajectory:node:year_90",
+        "brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "测试结构风险能否推动高复杂父级展开。",
+      "metricFocus": ["keyHitRate", "tokenCost", "roundCost"]
+    },
+    {
+      "sampleId": "JY-RG-016",
+      "title": "文字是弱者工具",
+      "coverage": "抽象信念 / 职业经历 / 关系一跳",
+      "input": "她说文字是弱者少数能握住的工具，这句话是从哪里来的？",
+      "recentHistory": ["刚才她替一个不会写字的人改了一封道歉信。"],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 20:00",
+        "location": "邮局后室",
+        "weather": "雨"
+      },
+      "intentSnapshotExpected": { "primary": "抽象动机", "secondary": "世界观 / 职业经历" },
+      "expectedRecallIds": [
+        "brain:worldview",
+        "brain:abilities",
+        "brain:experience",
+        "brain:trajectory:node:day_0088_03_12"
+      ],
+      "acceptableRecallIds": [
+        "brain:speaking_style",
+        "brain:trajectory:node:year_89",
+        "brain:personality"
+      ],
+      "expectedExpandIds": ["brain:trajectory:node:year_88"],
+      "forbiddenRecallIds": [
+        "brain:cognition:node:fefe7567-d06e-4f5d-a18c-12fbecfbf886",
+        "brain:cognition:node:93ee5bd4-4413-4c32-b4b7-ba02876d384c"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "抽象信念需要世界观、能力和职业转折共同解释。",
+      "metricFocus": ["keyHitRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-017",
+      "title": "大西洋黑潮与家书混合干扰",
+      "coverage": "多意图混合 / 高相似干扰 / 分区优先级",
+      "input": "大西洋黑潮会不会影响她把家书寄回乡下？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 20:30",
+        "location": "邮局柜台",
+        "weather": "阴"
+      },
+      "intentSnapshotExpected": { "primary": "世界交通", "secondary": "角色家书" },
+      "expectedRecallIds": [
+        "brain:cognition:node:4d77b94c-8962-47ae-8599-24d50ea755bb",
+        "brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe",
+        "brain:desc",
+        "brain:worldview"
+      ],
+      "acceptableRecallIds": ["brain:experience", "brain:trajectory:node:year_90"],
+      "expectedExpandIds": ["brain:cognition:node:84d8a656-1f9e-4577-a21d-6f70875ef2fe"],
+      "forbiddenRecallIds": [
+        "brain:trajectory:node:day_0088_03_12",
+        "brain:speaking_style"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "家书是强角色词，但本题实际问交通影响。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    },
+    {
+      "sampleId": "JY-RG-018",
+      "title": "空安排防幻觉",
+      "coverage": "近期安排 / 空真值 / 防幻觉",
+      "input": "今晚她有没有固定要做的安排？比如固定值班、见谁、或者去哪里？",
+      "recentHistory": [],
+      "environment": {
+        "character": "惊雨",
+        "virtualTime": "0091-05-07 21:00",
+        "location": "博瑞利尔三至五环",
+        "weather": "小雨"
+      },
+      "intentSnapshotExpected": { "primary": "近期安排", "secondary": "当前状态" },
+      "expectedRecallIds": [],
+      "acceptableRecallIds": ["brain:trajectory:node:year_91", "brain:trajectory:node:year_90", "brain:desc"],
+      "expectedExpandIds": [],
+      "forbiddenRecallIds": [
+        "brain:arrangement:daily",
+        "brain:arrangement:yearly",
+        "brain:arrangement:current"
+      ],
+      "expectedReadDecisions": {},
+      "mode": "all",
+      "notes": "当前无正式安排真值，只能召回生活状态辅助回答。",
+      "metricFocus": ["falsePositiveRate", "agentDependence"]
+    }
+  ]
+}

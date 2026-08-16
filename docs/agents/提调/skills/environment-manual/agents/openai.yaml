@@ -1,0 +1,4 @@
+interface:
+  display_name: "提调环境功能手册"
+  short_description: "按需读取提调在不同聊天链路中的职责、信号、工具与环境边界。"
+  default_prompt: "使用 $environment-manual 核对提调当前运行形态、允许产出和禁止事项。"

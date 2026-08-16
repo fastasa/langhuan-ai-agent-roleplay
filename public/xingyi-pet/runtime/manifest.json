@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "atlas": {
+    "src": "/xingyi-pet/runtime/mascot.svg",
+    "width": 192,
+    "height": 208,
+    "format": "svg"
+  },
+  "fallbackSrc": "/xingyi-pet/runtime/mascot.svg",
+  "animations": {
+    "idle": {
+      "loop": true,
+      "totalDurationMs": 1600,
+      "frames": [
+        {
+          "sourceIndex": 0,
+          "x": 0,
+          "y": 0,
+          "width": 192,
+          "height": 208,
+          "durationMs": 1600
+        }
+      ]
+    }
+  }
+}

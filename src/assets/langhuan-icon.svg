@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72" fill="none">
+  <path d="M17 35.5V27.8C17 15.4 25.1 7.4 36 7.4s19 8 19 20.4v7.7" stroke="#4f6f58" stroke-width="3.7" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(1.4521554638545737,-4.445205236325929) scale(0.9596624404574261,1)"/>
+  <path d="M23.2 35.5v-7C23.2 20 28.7 14.3 36 14.3s12.8 5.7 12.8 14.2v7" stroke="#4f6f58" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(-1.8777150431741063,-5.671473782493932) scale(1.0479006793933225,1)"/>
+  <path d="M14.7 31.5h10.5" stroke="#4f6f58" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(0.3000003262201876,-0.15328497161969779)"/>
+  <path d="M46.8 31.5h10.5" stroke="#4f6f58" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(-0.7999994158744812,0)"/>
+  <path d="M17 34.9v8" stroke="#4f6f58" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(-1,-2.900001600384712)"/>
+  <path d="M23.2 34.9v8" stroke="#4f6f58" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(1.2262573193784156,-2.9123807804055133)"/>
+  <path d="M48.8 34.9v8" stroke="#4f6f58" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(-1.4934404620498896,-3.678783184924825)"/>
+  <path d="M55 34.9v8" stroke="#4f6f58" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(0.6131286596892025,-2.452531478941218)"/>
+  <path d="M36 47.4v15.4" stroke="#4f6f58" stroke-width="3.25" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226)"/>
+  <path d="M36 47.4c-6.5-6.7-14.9-7.8-25.6-5.5L6.8 58c10.7-2.9 20.5-1.8 29.2 4.8" stroke="#4f6f58" stroke-width="3.25" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(0,3.1284368310566038) scale(1,0.9233352050352752)"/>
+  <path d="M36 47.4c6.5-6.7 14.9-7.8 25.6-5.5L65.2 58c-10.7-2.9-20.5-1.8-29.2 4.8" stroke="#4f6f58" stroke-width="3.25" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226) translate(0,2.8440296954430124) scale(1,0.9303048246618786)"/>
+  <path d="M7.8 62c10.1-1.8 19.9-.7 28.2 2.6" stroke="#4f6f58" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226)"/>
+  <path d="M64.2 62c-10.1-1.8-19.9-.7-28.2 2.6" stroke="#4f6f58" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0,2.2226)"/>
+</svg>

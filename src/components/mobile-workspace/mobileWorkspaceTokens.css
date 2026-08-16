@@ -1,0 +1,95 @@
+/* 移动端工作壳局部设计 token —— 精确镜像 Claude Design「琅嬛移动端高保真」原型
+   (handoff/tokens/colors_and_type.css + hifi-kit.jsx 的 LH 对象)。
+   作用域限定在 .mobile-surface，不影响桌面端；颜色与项目 --morandi-* 同源，
+   这里只补齐设计稿专用的细线、四级灰、角色扮演色与头像色等精确值。
+   纸纹按用户要求沿用现状（见 MobilePaperSurface），不在此处复刻设计稿强纸纹。 */
+
+.mobile-surface {
+  /* 表面 */
+  --lhm-bg: #f8f4ee;
+  --lhm-card: #fffdf8;
+  --lhm-surface: #fbf7f0;
+  --lhm-soft: #faf7f1;
+  --lhm-soft-strong: #f1eae0;
+  --lhm-hover: #f3eee6;
+
+  /* 品牌强调：绿=动作/激活，棕=结构/区块 */
+  --lhm-accent: #5c8a5c;
+  --lhm-primary: #8b7355;
+  --lhm-secondary: #b5a99a;
+
+  /* 文本四级灰 */
+  --lhm-text: #333333;
+  --lhm-text-light: #666666;
+  --lhm-text-muted: #999999;
+  --lhm-text-faint: #b6b0a7;
+
+  /* 线与边框 */
+  --lhm-border: #e0e0e0;
+  --lhm-border-warm: rgba(139, 115, 85, 0.12);
+  --lhm-border-line: #e5e5e5;
+
+  /* 语义 */
+  --lhm-gold: #d4a843;
+  --lhm-danger: #c0665a;
+  --lhm-info: #a0b5c4;
+  --lhm-user-bubble: #d8cfc4;
+
+  /* 角色扮演行内标记 */
+  --lhm-rp-action: #5c8a5c;
+  --lhm-rp-thought: #8b7355;
+  --lhm-rp-emph: #d4a843;
+  --lhm-rp-comment: #7f8c8d;
+
+  /* 旁白正文=楷体小说体墨色（2026-07-12·与桌面 main.css 旁白色联动，暗色走本 token 体系不再单独写 [data-theme=dark] 选择器） */
+  --lhm-narration-ink: #42463f;
+
+  /* 莫兰迪头像底色 */
+  --lhm-av-brown: #8b7355;
+  --lhm-av-olive: #5c8a5c;
+  --lhm-av-blue: #8fa6b2;
+  --lhm-av-sand: #b5a082;
+  --lhm-av-rose: #bc8c84;
+
+  /* 树引导线 / 选中底 */
+  --lhm-tree-guide: rgba(120, 113, 98, 0.3);
+  --lhm-tree-sel: rgba(139, 115, 85, 0.09);
+
+  /* 悬浮玻璃导航留白：滚动内容底部需让出浮动胶囊 */
+  --lhm-nav-pad: 100px;
+
+  --lhm-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei UI', 'Noto Sans SC', system-ui, sans-serif;
+  --lhm-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 暗色：纸面回退纯色，文本/卡片/边框接项目暗色真值，强调色保持不变 */
+[data-theme='dark'] .mobile-surface {
+  --lhm-bg: #1a1816;
+  --lhm-card: #363330;
+  --lhm-surface: #2f2c29;
+  --lhm-soft: #2c2a27;
+  --lhm-soft-strong: #3a3633;
+  --lhm-hover: #322f2b;
+  --lhm-text: #ebe5de;
+  --lhm-text-light: #c2bbb3;
+  --lhm-text-muted: #9a958c;
+  --lhm-text-faint: #7c766c;
+  --lhm-border: #4a4540;
+  --lhm-border-warm: rgba(181, 165, 148, 0.16);
+  --lhm-border-line: #2c2a27;
+  --lhm-user-bubble: #8a8275;
+  --lhm-secondary: #5b6450;
+  --lhm-narration-ink: #cdc9c0;
+}
+
+/* 隐藏滚动条（对齐原型 .lh-scroll） */
+.lhm-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.lhm-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

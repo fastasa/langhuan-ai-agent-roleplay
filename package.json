@@ -1,0 +1,76 @@
+{
+  "name": "langhuan-local",
+  "version": "1.0.0",
+  "description": "琅嬛本地工作区 - 无账号、无后台的 AI 聊天与创作工具",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node clean-port.js && concurrently --kill-others \"nodemon --exitcrash --exec tsx server/server.ts\" \"vite\"",
+    "check:utf8": "node scripts/check-utf8.mjs",
+    "check:dev-startup:smoke": "node scripts/check-dev-startup-smoke.mjs",
+    "check:public-safety": "node scripts/check-public-safety.mjs public",
+    "check:dist-safety": "node scripts/check-public-safety.mjs dist",
+    "prebuild": "npm run check:utf8 && npm run check:public-safety",
+    "build": "vite build",
+    "postbuild": "npm run check:dist-safety",
+    "start": "tsx server/server.ts",
+    "test": "vitest",
+    "pretest:run": "npm run check:utf8",
+    "test:run": "vitest run --maxWorkers=4",
+    "test:full": "npm run test:run",
+    "test:related": "vitest related --maxWorkers=4",
+    "test:server": "vitest run --project server-node --maxWorkers=4",
+    "test:browser": "vitest run --project browser-jsdom --pool=threads --maxWorkers=4",
+    "test:coverage": "vitest run --coverage --maxWorkers=4",
+    "check:test-partition": "node scripts/check-test-project-partition.mjs",
+    "pretype-check": "npm run check:utf8",
+    "type-check": "vue-tsc --noEmit",
+    "check:release": "node scripts/check-open-source-release.mjs",
+    "verify": "npm run type-check && npm run test:server && npm run test:browser && npm run build && npm run check:release"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.6.2",
+    "fflate": "^0.8.3",
+    "lz-string": "^1.5.0",
+    "markdown-it": "^15.0.0",
+    "morgan": "^1.11.0",
+    "multer": "^2.2.0",
+    "pinia": "^2.3.1",
+    "postcss": "^8.5.26",
+    "sql.js": "^1.14.2",
+    "tsx": "^4.23.12",
+    "undici": "^7.29.0",
+    "vite": "^8.2.1",
+    "vue": "^3.5.41",
+    "vue-i18n": "^11.4.8"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@vue/test-utils": "^2.4.11",
+    "@vue/tsconfig": "^0.9.1",
+    "better-sqlite3": "^12.11.1",
+    "concurrently": "^10.0.5",
+    "jsdom": "^29.1.1",
+    "nodemon": "^3.1.14",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.10"
+  },
+  "overrides": {
+    "@huggingface/transformers": {
+      "sharp": "0.35.0"
+    },
+    "onnxruntime-node": {
+      "tar": "7.5.22"
+    }
+  }
+}
