@@ -36,6 +36,7 @@ vi.mock('../../../server/logger.js', () => ({
 
 import {
   generateDueXingyiDiaries,
+  resetXingyiDiaryAutoFailureState,
   resolveLatestReadyXingyiDiaryDateStr,
   resolveXingyiDiaryAutoTargets
 } from '../../../server/services/xingyiDiaryScheduler.ts'
@@ -43,6 +44,7 @@ import {
 describe('xingyiDiaryScheduler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetXingyiDiaryAutoFailureState()
     generateXingyiDiaryMarkdownMock.mockImplementation(async (dateStr) => `# ${dateStr}`)
     getConfigValueMock.mockImplementation((key, options) => {
       if (options?.scope === 'system') return { value: '2026-07-12' }
@@ -115,6 +117,33 @@ describe('xingyiDiaryScheduler', () => {
     expect(upsertConfigValueMock).toHaveBeenCalledTimes(1)
     expect(upsertConfigValueMock.mock.calls[0][1]).toBe('2026-07-13')
     expect(generateXingyiDiaryMarkdownMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('连续失败后按 1 分钟、10 分钟、6 小时退避，等待期不重复调用模型', async () => {
+    getConfigValueMock.mockImplementation((key, options) => {
+      if (options?.scope === 'system') return { value: '2026-07-14' }
+      return { value: 'xingyi' }
+    })
+    generateXingyiDiaryMarkdownMock.mockRejectedValue(new Error('模型失败'))
+    const start = new Date(2026, 6, 16, 8, 0)
+
+    await expect(generateDueXingyiDiaries(start)).rejects.toThrow('模型失败')
+    const firstDeferred = await generateDueXingyiDiaries(new Date(start.getTime() + 30_000))
+    expect(firstDeferred.consecutiveFailures).toBe(1)
+    expect(generateXingyiDiaryMarkdownMock).toHaveBeenCalledTimes(1)
+
+    const secondAttemptAt = new Date(start.getTime() + 60_000)
+    await expect(generateDueXingyiDiaries(secondAttemptAt)).rejects.toThrow('模型失败')
+    const secondDeferred = await generateDueXingyiDiaries(new Date(secondAttemptAt.getTime() + 5 * 60_000))
+    expect(secondDeferred.consecutiveFailures).toBe(2)
+    expect(generateXingyiDiaryMarkdownMock).toHaveBeenCalledTimes(2)
+
+    const thirdAttemptAt = new Date(secondAttemptAt.getTime() + 10 * 60_000)
+    await expect(generateDueXingyiDiaries(thirdAttemptAt)).rejects.toThrow('模型失败')
+    const thirdDeferred = await generateDueXingyiDiaries(new Date(thirdAttemptAt.getTime() + 60_000))
+    expect(thirdDeferred.consecutiveFailures).toBe(3)
+    expect(new Date(thirdDeferred.deferredUntil).getTime()).toBe(thirdAttemptAt.getTime() + 6 * 60 * 60_000)
+    expect(generateXingyiDiaryMarkdownMock).toHaveBeenCalledTimes(3)
   })
 
   it('并发标签页检查共享同一个生成运行，不重复调用模型', async () => {

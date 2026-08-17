@@ -22,9 +22,28 @@ const DATE_STR_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 export interface XingyiDiaryAutoGenerationResult {
   generatedDates: string[]
   latestReadyDateStr: string
+  deferredUntil?: string
+  consecutiveFailures?: number
 }
 
 let activeGenerationRun: Promise<XingyiDiaryAutoGenerationResult> | null = null
+let autoFailureState: {
+  targetDateStr: string
+  consecutiveFailures: number
+  nextRetryAtMs: number
+} | null = null
+
+// 自动补生失败后按 1 分钟 → 10 分钟 → 6 小时退避；第三次后不再每分钟调模型。
+const AUTO_FAILURE_RETRY_DELAYS_MS = [60_000, 10 * 60_000, 6 * 60 * 60_000] as const
+
+export function resetXingyiDiaryAutoFailureState(): void {
+  autoFailureState = null
+}
+
+function getFailureRetryDelayMs(consecutiveFailures: number): number {
+  const index = Math.min(Math.max(1, consecutiveFailures), AUTO_FAILURE_RETRY_DELAYS_MS.length) - 1
+  return AUTO_FAILURE_RETRY_DELAYS_MS[index]
+}
 
 function parseYmd(dateStr: string): { year: number; month: number; day: number } | null {
   const match = DATE_STR_PATTERN.exec(String(dateStr || '').trim())
@@ -88,11 +107,46 @@ async function runDueGeneration(now: Date): Promise<XingyiDiaryAutoGenerationRes
   const targets = resolveXingyiDiaryAutoTargets(now, lastRow?.value || '')
   const generatedDates: string[] = []
 
+  const firstTargetDateStr = targets[0] || ''
+  if (!firstTargetDateStr) {
+    resetXingyiDiaryAutoFailureState()
+    return { generatedDates, latestReadyDateStr }
+  }
+  if (autoFailureState?.targetDateStr !== firstTargetDateStr) {
+    resetXingyiDiaryAutoFailureState()
+  }
+  if (autoFailureState && now.getTime() < autoFailureState.nextRetryAtMs) {
+    return {
+      generatedDates,
+      latestReadyDateStr,
+      deferredUntil: new Date(autoFailureState.nextRetryAtMs).toISOString(),
+      consecutiveFailures: autoFailureState.consecutiveFailures
+    }
+  }
+
   for (const targetDateStr of targets) {
-    const markdown = await generateXingyiDiaryMarkdown(targetDateStr, resolveViewpoint(), 'fullDay')
+    let markdown: string
+    try {
+      markdown = await generateXingyiDiaryMarkdown(targetDateStr, resolveViewpoint(), 'fullDay')
+    } catch (error) {
+      const consecutiveFailures = autoFailureState?.targetDateStr === targetDateStr
+        ? autoFailureState.consecutiveFailures + 1
+        : 1
+      const retryDelayMs = getFailureRetryDelayMs(consecutiveFailures)
+      autoFailureState = {
+        targetDateStr,
+        consecutiveFailures,
+        nextRetryAtMs: now.getTime() + retryDelayMs
+      }
+      logger.warn(
+        `[星依日记] 自动补生失败 ${consecutiveFailures} 次，将在 ${new Date(autoFailureState.nextRetryAtMs).toISOString()} 后重试`
+      )
+      throw error
+    }
     writeXingyiDiaryFile(targetDateStr, markdown)
     // 每天成功后立即推进游标。若后续某天失败，下次从失败日继续，不重复消耗前面已经成功的日期。
     settingRepository.upsertConfigValue(AUTO_LAST_GENERATED_DATE_KEY, targetDateStr, { scope: 'system' })
+    resetXingyiDiaryAutoFailureState()
     generatedDates.push(targetDateStr)
     logger.system(`[星依日记] 网页活跃补生成完成："${targetDateStr}"`)
   }
@@ -102,7 +156,7 @@ async function runDueGeneration(now: Date): Promise<XingyiDiaryAutoGenerationRes
 
 /**
  * 本地网页活跃检查的服务端入口。并发打开多个标签页时共享同一个运行 Promise，避免同一天重复调用模型。
- * 生成失败不吞错、不推进失败日游标，由路由返回明确失败；前端下一次活跃检查会继续重试。
+ * 生成失败不吞错、不推进失败日游标；后续活跃检查按服务端退避状态重试，等待期内不再调模型。
  */
 export function generateDueXingyiDiaries(now: Date = new Date()): Promise<XingyiDiaryAutoGenerationResult> {
   if (activeGenerationRun) return activeGenerationRun

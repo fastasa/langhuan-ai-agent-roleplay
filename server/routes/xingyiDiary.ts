@@ -11,7 +11,10 @@ import {
   XINGYI_DIARY_VIEWPOINT_CONFIG_KEY,
   type XingyiDiaryViewpoint
 } from '../services/xingyiDiaryService.js'
-import { generateDueXingyiDiaries } from '../services/xingyiDiaryScheduler.js'
+import {
+  generateDueXingyiDiaries,
+  resetXingyiDiaryAutoFailureState
+} from '../services/xingyiDiaryScheduler.js'
 
 const router = Router()
 
@@ -44,6 +47,7 @@ router.post('/xingyi/diary/generate-now', async (_req: Request, res: Response) =
     const viewpoint = normalizeViewpoint(row?.value)
     const markdown = await generateXingyiDiaryMarkdown(todayStr, viewpoint, 'toNow')
     writeXingyiDiaryFile(todayStr, markdown)
+    resetXingyiDiaryAutoFailureState()
     res.json({ ok: true, dateStr: todayStr, viewpoint })
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : '生成星依日记失败' })

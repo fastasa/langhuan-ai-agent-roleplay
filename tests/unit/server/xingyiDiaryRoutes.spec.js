@@ -19,7 +19,8 @@ vi.mock('../../../server/services/xingyiDiaryService.js', () => ({
   XINGYI_DIARY_VIEWPOINT_CONFIG_KEY: 'xingyi_diary_viewpoint'
 }))
 vi.mock('../../../server/services/xingyiDiaryScheduler.js', () => ({
-  generateDueXingyiDiaries: vi.fn()
+  generateDueXingyiDiaries: vi.fn(),
+  resetXingyiDiaryAutoFailureState: vi.fn()
 }))
 
 import { settingRepository } from '../../../server/repositories/settingRepository.js'
@@ -29,7 +30,10 @@ import {
   listXingyiDiaryDates,
   readXingyiDiaryFile
 } from '../../../server/services/xingyiDiaryService.js'
-import { generateDueXingyiDiaries } from '../../../server/services/xingyiDiaryScheduler.js'
+import {
+  generateDueXingyiDiaries,
+  resetXingyiDiaryAutoFailureState
+} from '../../../server/services/xingyiDiaryScheduler.js'
 import router from '../../../server/routes/xingyiDiary.ts'
 
 function findHandler(path, method) {
@@ -121,6 +125,7 @@ describe('routes/xingyiDiary', () => {
 
       expect(generateXingyiDiaryMarkdown).toHaveBeenCalledWith('2026-07-16', 'xingyi', 'toNow')
       expect(writeXingyiDiaryFile).toHaveBeenCalledWith('2026-07-16', '# 2026-07-16\n\n今天的日记正文')
+      expect(resetXingyiDiaryAutoFailureState).toHaveBeenCalledTimes(1)
       expect(res.json).toHaveBeenCalledWith({ ok: true, dateStr: '2026-07-16', viewpoint: 'xingyi' })
     })
 
@@ -143,6 +148,7 @@ describe('routes/xingyiDiary', () => {
       expect(res.status).toHaveBeenCalledWith(400)
       expect(res.json).toHaveBeenCalledWith({ error: '星依日记：模型调用失败——限流了' })
       expect(writeXingyiDiaryFile).not.toHaveBeenCalled()
+      expect(resetXingyiDiaryAutoFailureState).not.toHaveBeenCalled()
     })
   })
 

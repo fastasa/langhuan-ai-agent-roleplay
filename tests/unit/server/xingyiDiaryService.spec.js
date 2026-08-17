@@ -30,6 +30,13 @@ vi.mock('../../../server/repositories/chatRepository.js', () => ({
   }
 }))
 
+const { getConfigValueMock } = vi.hoisted(() => ({
+  getConfigValueMock: vi.fn()
+}))
+vi.mock('../../../server/repositories/settingRepository.js', () => ({
+  settingRepository: { getConfigValue: getConfigValueMock }
+}))
+
 const { callAIWithFallbackMock } = vi.hoisted(() => ({
   callAIWithFallbackMock: vi.fn()
 }))
@@ -56,6 +63,18 @@ function upstreamJson(message) {
 }
 
 describe('xingyiDiaryService', () => {
+  beforeEach(() => {
+    getConfigValueMock.mockReturnValue({
+      value: JSON.stringify([{
+        id: 'brain_agent',
+        modelUsageConfigs: [{
+          id: 'balanced', label: '校书', presetName: 'DeepSeek', model: 'deepseek-v4-flash',
+          temperature: 0.6, maxTokens: 4096, thinking: 'enabled'
+        }]
+      }])
+    })
+  })
+
   describe('resolveDiaryDateWindow', () => {
     it('fullDay 返回逻辑日 05:00:00.000~次日 04:59:59.999 的 ISO 区间', () => {
       const { startIso, endIso } = resolveDiaryDateWindow('2026-07-16', 'fullDay')
@@ -209,10 +228,14 @@ describe('xingyiDiaryService', () => {
       expect(listTidiaoDirectorStreamArtifactsInRangeMock).toHaveBeenCalledWith(expect.any(String), expect.any(String))
       expect(callAIWithFallbackMock).toHaveBeenCalledTimes(1)
       const [presetName, model, messages, stream, , context] = callAIWithFallbackMock.mock.calls[0]
-      expect(presetName).toBeUndefined()
-      expect(model).toBeUndefined()
+      expect(presetName).toBe('DeepSeek')
+      expect(model).toBe('deepseek-v4-flash')
       expect(stream).toBe(false)
       expect(context.feature).toBe('xingyi')
+      expect(context.modelUsageSlotId).toBe('balanced')
+      expect(context.maxTokens).toBe(2048)
+      expect(context.temperature).toBe(0.7)
+      expect(context.thinking).toBe('disabled')
       expect(context.usageLabel).toBe('星依日记生成：2026-07-16')
       // mini agent 化：挂载日记知识库与本地任务记录工具
       expect(Array.isArray(context.tools)).toBe(true)

@@ -22,6 +22,10 @@ describe('modelTaskTiers imageCaption', () => {
     expect(MODEL_TASK_TIERS.imageCaption).toBe('balanced')
   })
 
+  it('星依日记使用 balanced（校书）档，不依赖未设置的默认 API 预设', () => {
+    expect(MODEL_TASK_TIERS.xingyiDiary).toBe('balanced')
+  })
+
   it('buildTaskModelAiOptions 按 imageCaption 取档，覆写参数透传', () => {
     const agentConfig = {
       modelUsageConfigs: [

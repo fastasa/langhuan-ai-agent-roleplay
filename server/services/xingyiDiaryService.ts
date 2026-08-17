@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { mkdirSync, writeFileSync, readdirSync, readFileSync } from 'fs'
 import { chatRepository } from '../repositories/chatRepository.js'
+import { settingRepository } from '../repositories/settingRepository.js'
 import { aiAppService, callInternalAIJson } from '../application/ai/aiAppService.js'
 import { getActiveDataScope } from '../localWorkspace.js'
 import { logger } from '../logger.js'
@@ -16,6 +17,7 @@ import { createXingyiDiaryKnowledgeTools } from './xingyiDiaryKnowledge.js'
 // directorVisibleHistory.ts 渲染提调「对话可见历史」同一思路（该函数纯字符串解析，无 DB 依赖，
 // 服务端可直接复用，见函数内注释）。
 import { parseEmbeddedMessageProjectionOutput } from '../../src/app/messageProjectionAgent.js'
+import { buildTaskModelAiOptions } from '../../src/utils/modelTaskTiers.js'
 
 // 星依日记视角设置在用户配置表里的 key（批次2 落库时复用同一个常量，避免两处各写一份字符串）
 export const XINGYI_DIARY_VIEWPOINT_CONFIG_KEY = 'xingyi_diary_viewpoint'
@@ -275,6 +277,22 @@ async function runXingyiDiaryAgent(input: {
   const toolRegistry = new ToolRegistry(tools)
   const skillAssembly = await assembleAgentSkillSupply({ profileId: 'xingyi.diary-generation' })
   const toolSupply = resolveAgentRuntimeToolSupply('xingyi.diary-generation', toolRegistry)
+  const configRow = settingRepository.getConfigValue('agentModelConfigs')
+  let agentConfigs: unknown[] = []
+  try {
+    const parsed = JSON.parse(String(configRow?.value || '[]'))
+    agentConfigs = Array.isArray(parsed) ? parsed : []
+  } catch {
+    agentConfigs = []
+  }
+  const brainAgentConfig = (agentConfigs.find((item: any) => String(item?.id || '') === 'brain_agent')
+    || agentConfigs[0]
+    || null) as Record<string, unknown> | null
+  const modelOptions = buildTaskModelAiOptions(brainAgentConfig, 'xingyiDiary', {
+    maxTokens: 2048,
+    temperature: 0.7,
+    thinking: 'disabled'
+  })
 
   const { transcript } = await runAgentRuntime({
     agentName: XINGYI_DIARY_AGENT_NAME,
@@ -292,14 +310,19 @@ async function runXingyiDiaryAgent(input: {
     callModel: async ({ messages, toolBriefs }) => {
       const result = await callInternalAIJson(
         aiAppService,
-        undefined,
-        undefined,
+        modelOptions.presetName || undefined,
+        modelOptions.model || undefined,
         messages,
         logger,
         {
           userId: input.scope.userId || '',
           role: 'local',
           feature: 'xingyi',
+          modelUsageSlotId: modelOptions.modelUsageSlotId,
+          maxTokens: modelOptions.maxTokens,
+          temperature: modelOptions.temperature,
+          thinking: modelOptions.thinking,
+          ...(modelOptions.serviceTier ? { serviceTier: modelOptions.serviceTier } : {}),
           usageLabel: '星依日记生成：' + input.dateStr,
           tools: toOpenAiTools(toolBriefs),
           toolChoice: 'auto'

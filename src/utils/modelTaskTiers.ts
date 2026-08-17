@@ -37,6 +37,7 @@ export type ModelTaskId =
   | 'recallJudge'           // 召回候选裁判
   | 'recallFormat'          // 召回过程润色/里程碑改写等格式化小任务
   | 'messageProjection'     // 消息投影（服务端·格式化小任务）
+  | 'xingyiDiary'           // 星依日记整理 mini agent（服务端·跨会话素材改写）
   | 'improvCharacterExtract'// 即兴角色核心资料提取（服务端·原高量档）
   | 'projectionWriteback'   // 投影写回轨迹 agent（服务端）
   | 'sessionTempProfile'    // 会话临时角色/实体资料整理（服务端）
@@ -64,6 +65,7 @@ export const MODEL_TASK_TIERS: Record<ModelTaskId, ModelUsageSlotId> = {
   recallJudge: 'balanced',
   recallFormat: 'fast',
   messageProjection: 'fast',
+  xingyiDiary: 'balanced',
   improvCharacterExtract: 'smart',
   projectionWriteback: 'balanced',
   sessionTempProfile: 'balanced',
