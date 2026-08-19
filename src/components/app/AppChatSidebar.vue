@@ -118,9 +118,6 @@
               </button>
             </SidebarFloatingMenu>
           </div>
-          <div v-if="filteredChatSessionRows.length === 0" class="chat-session-empty">
-            {{ t('sidebar.emptySessions') }}
-          </div>
         </div>
       </div>
 
@@ -1029,7 +1026,7 @@
           <div class="sidebar-section">
             <div class="sidebar-section-title">
               <div class="sidebar-section-heading">
-                <span>提示词</span>
+                <span>角色提示词</span>
                 <span class="sidebar-section-count">{{ docPromptTotalCount }}</span>
               </div>
               <div class="sidebar-section-actions">
@@ -1143,6 +1140,26 @@
                 <span class="doc-sidebar-row-count">{{ row.count }}</span>
               </button>
             </div>
+          </div>
+        </template>
+
+        <template v-else-if="activeDocTab === 'scenarioPrompt'">
+          <div class="sidebar-section doc-scenario-prompt-section">
+            <div class="sidebar-section-title">
+              <div class="sidebar-section-heading">
+                <span>情境提示词</span>
+              </div>
+              <div
+                :id="SCENARIO_PROMPT_ACTIONS_TARGET_ID"
+                class="doc-scenario-prompt-actions-host"
+                data-scenario-prompt-actions-host="true"
+              ></div>
+            </div>
+            <div
+              :id="SCENARIO_PROMPT_TREE_TARGET_ID"
+              class="doc-scenario-prompt-tree-host"
+              data-scenario-prompt-tree-host="true"
+            ></div>
           </div>
         </template>
 
@@ -1477,6 +1494,8 @@ import type { AppMoveDialogRow } from '../common/AppMoveDialog.vue'
 import { useToast } from '../../composables/useToast'
 import {
   DOC_LIBRARY_MODULE_TABS,
+  SCENARIO_PROMPT_ACTIONS_TARGET_ID,
+  SCENARIO_PROMPT_TREE_TARGET_ID,
   isDocLibraryModuleTabEnabled,
   normalizeVisibleDocLibraryModuleTab
 } from '../../app/docLibraryModules'
@@ -6248,13 +6267,6 @@ onUnmounted(() => {
   color: var(--chat-sidebar-on-bg-muted);
 }
 
-.chat-session-empty {
-  padding: 28px 8px;
-  text-align: center;
-  color: rgba(79, 73, 66, 0.54);
-  font-size: 12px;
-}
-
 .chat-session-rename input {
   width: 100%;
   border: 1px solid rgba(120, 108, 92, 0.2);
@@ -7752,6 +7764,33 @@ onUnmounted(() => {
 
 .doc-sidebar-tree {
   padding: 6px 8px 14px;
+}
+
+.doc-scenario-prompt-section {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.doc-scenario-prompt-section > .sidebar-section-title {
+  min-height: 26px;
+  flex-wrap: nowrap;
+}
+
+.doc-scenario-prompt-actions-host {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+}
+
+.doc-scenario-prompt-tree-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 8px 14px;
 }
 
 .doc-sidebar-sone-section {

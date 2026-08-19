@@ -139,7 +139,7 @@ const PET_DRAG_THRESHOLD = 4
 const PET_POSITION_STORAGE_KEY = 'langhuan.xingyiPet.position'
 const STANDALONE_LAUNCHER_SIZE = 38
 const STANDALONE_LAUNCHER_POSITION_STORAGE_KEY = 'langhuan.xingyiPet.standaloneLauncherPosition'
-const PET_FALLBACK_SRC = '/xingyi-pet/runtime/mascot.svg'
+const PET_FALLBACK_SRC = '/xingyi-pet/xingyi-pet-idle-v2.png'
 const PET_SPRITE_SCALE = 1.24
 
 /* 立绘可见轮廓在左侧留有透明带；三个历史锚点 (5%,16/42/68%) 都曾人工确认不压到头发、手臂或卫衣。

@@ -97,6 +97,7 @@ export interface ChatPromptLogCreatePayload {
   targetId?: string
   finalPrompt: string
   promptBlocks: ChatPromptLogBlock[]
+  logKind?: 'final_reply' | 'internal_agent' | 'message_projection' | 'manual_projection'
 }
 
 export interface ChatRecallActivityLogCreatePayload {
@@ -2895,7 +2896,7 @@ export async function runChatMessageProjectionBySessionId(
   sessionId: string,
   messageId: number | string,
   // 消耗溯源：批量投影传 op:batch_projection:… 单元 id；不传=服务端并入消息所在轮。
-  usageUnit?: { unitId?: string; unitKind?: string }
+  usageUnit?: { unitId?: string; unitKind?: string; promptLogMode?: 'manual' | 'background' }
 ): Promise<Record<string, unknown>> {
   const response = await fetch(API.chatSessionMessageProjectionRun(sessionId, messageId), {
     method: 'POST',

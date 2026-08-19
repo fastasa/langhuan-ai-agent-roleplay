@@ -1,7 +1,7 @@
 {
-  "name": "langhuan-local",
+  "name": "langhuan-ai-agent",
   "version": "1.0.0",
-  "description": "琅嬛本地工作区 - 无账号、无后台的 AI 聊天与创作工具",
+  "description": "琅嬛 Langhuan - 本地优先的开源 AI Agent 角色扮演工作台",
   "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=20.19.0"

@@ -155,11 +155,35 @@
                 </button>
               </div>
             </article>
-            <!-- 编目嵌入模型跟随本地配置。 -->
             <article class="mobile-api-usage-card">
               <div class="mobile-api-usage-card__title">
                 <strong>{{ $t('mobile.apiWs.catalogEmbedding') }}</strong>
                 <small>{{ $t('mobile.apiWs.catalogHint') }}</small>
+              </div>
+              <label>
+                <span>{{ $t('mobile.apiWs.readonlyPreset') }}</span>
+                <select :value="draftAgentConfig.embeddingPresetId || ''" @change="selectEmbeddingPreset(($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ $t('mobile.apiWs.embeddingPresetPlaceholder') }}</option>
+                  <option v-for="preset in embeddingPresetOptions" :key="`embedding-${String(preset.name)}`" :value="String(preset.name || '')">{{ preset.name }}</option>
+                </select>
+              </label>
+              <label>
+                <span>{{ $t('mobile.apiWs.modelLabel') }}</span>
+                <input :value="draftAgentConfig.embeddingModel || ''" :placeholder="$t('mobile.apiWs.embeddingModelPlaceholder')" @input="updateEmbeddingModel(($event.target as HTMLInputElement).value)">
+              </label>
+              <label>
+                <span>{{ $t('mobile.apiWs.embeddingDimensions') }}</span>
+                <select :value="draftAgentConfig.embeddingDimensions || 512" @change="updateEmbeddingDimensions(Number(($event.target as HTMLSelectElement).value))">
+                  <option v-for="dimension in AI_EMBEDDING_DIMENSIONS" :key="dimension" :value="dimension">{{ dimension }}</option>
+                </select>
+              </label>
+              <div class="mobile-api-inline-actions">
+                <button type="button" class="mobile-api-lite-button" :disabled="embeddingModelLoading || !selectedEmbeddingPreset" @click="loadEmbeddingModels">
+                  {{ embeddingModelLoading ? $t('mobile.apiWs.loadingShort') : $t('mobile.apiWs.loadModels') }}
+                </button>
+              </div>
+              <div v-if="embeddingModelOptions.length" class="mobile-api-model-list">
+                <button v-for="model in embeddingModelOptions" :key="`embedding-${model}`" type="button" @click="updateEmbeddingModel(model)">{{ model }}</button>
               </div>
             </article>
           </div>
@@ -258,6 +282,15 @@
           <span>{{ $t('mobile.apiWs.maxTokens') }}</span>
           <input :value="getUsageConfig(editingUsageSlot).maxTokens" type="number" min="1" max="32768" @input="updateUsageConfig(editingUsageSlot, { maxTokens: Number(($event.target as HTMLInputElement).value) })">
         </label>
+        <label v-if="editingUsageShowsEffort">
+          <span>{{ $t('mobile.apiWs.reasoningEffort') }}</span>
+          <select :value="getUsageConfig(editingUsageSlot).effort" @change="updateUsageConfig(editingUsageSlot, { effort: ($event.target as HTMLSelectElement).value })">
+            <option value="">{{ editingUsageDefaultEffortLabel }}</option>
+            <option v-for="option in editingUsageEffortOptions" :key="option.reasoningEffort" :value="option.reasoningEffort">
+              {{ option.description ? `${option.reasoningEffort}｜${option.description}` : option.reasoningEffort }}
+            </option>
+          </select>
+        </label>
         <label>
           <span>{{ isEditingUsageAgySubscriptionBridge ? $t('mobile.apiWs.reasoningSummaryUnavailable') : (isEditingUsageSubscriptionBridge ? $t('mobile.apiWs.reasoningSummary') : $t('mobile.apiWs.thinking')) }}</span>
           <select :value="isEditingUsageAgySubscriptionBridge ? 'disabled' : getUsageConfig(editingUsageSlot).thinking" :disabled="isEditingUsageAgySubscriptionBridge" @change="updateUsageConfig(editingUsageSlot, { thinking: (($event.target as HTMLSelectElement).value === 'enabled' ? 'enabled' : 'disabled') })">
@@ -287,7 +320,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getAiProviderTemplate, isKeylessAiProvider, normalizeAiProviderType } from '../../../shared/aiProviders'
+import { AI_EMBEDDING_DIMENSIONS, getAiProviderTemplate, isKeylessAiProvider, normalizeAiProviderType } from '../../../shared/aiProviders'
 import { API } from '../../config/api'
 import type {
   AgentModelConfig,
@@ -301,8 +334,10 @@ import type {
   WriteBackAuditLogLevel
 } from '../../types'
 import type { ApiPresetFormViewModel, NamedEntity } from '../../types/panelContracts'
-import { DEFAULT_MODEL_USAGE_CONFIGS, normalizeModelUsageConfigs } from '../../utils/modelUsageConfig'
+import { DEFAULT_MODEL_USAGE_CONFIGS, normalizeEmbeddingDimensions, normalizeModelReasoningEffort, normalizeModelUsageConfigs } from '../../utils/modelUsageConfig'
 import {
+  getModelDefaultReasoningEffort,
+  getModelReasoningEffortOptions,
   isSubscriptionBridgeProvider,
   modelSupportsServiceTier,
   subscriptionBridgeReturnsThinkingSummary,
@@ -331,7 +366,7 @@ const tabs = computed<Array<{ id: TabId; label: string }>>(() =>
   TAB_DEFS.map((def) => ({ id: def.id, label: t(def.labelKey) }))
 )
 
-// 文本槽四档+编目（嵌入·服务端管理默认，模板单独展示行）。
+// 文本槽四档+编目（嵌入·本地预设/模型/维度独立配置，模板单独展示行）。
 // ⚠️ 联动：AppApiConfigSection.vue 的 modelUsageSlots 是同一份口径的桌面端版本，改这里要同步改那边。
 const MODEL_USAGE_SLOT_DEFS: Array<{ id: ModelUsageSlotId; labelKey: string; hintKey: string }> = [
   { id: 'fast', labelKey: 'mobile.apiWs.slotFast', hintKey: 'mobile.apiWs.slotFastHint' },
@@ -356,6 +391,8 @@ const defaultBrainAgentConfig: AgentModelConfig = {
   fallbackRecallModel: '',
   fallbackRecallMaxTokens: 512,
   embeddingPresetId: '',
+  embeddingModel: '',
+  embeddingDimensions: 512,
   narrationQuickJudgePresetName: '',
   narrationQuickJudgeModel: '',
   narrativeBeatPresetName: '',
@@ -390,6 +427,8 @@ const editingUsageSlot = ref<ModelUsageSlotId | ''>('')
 const usageModelOptions = ref<Record<ModelUsageSlotId, string[]>>(emptyUsageModelOptions())
 const usageModelLoading = ref<Record<ModelUsageSlotId, boolean>>(emptyUsageModelLoading())
 const usageModelCatalogs = ref<Partial<Record<ModelUsageSlotId, AiModelCatalogItem[]>>>({})
+const embeddingModelOptions = ref<string[]>([])
+const embeddingModelLoading = ref(false)
 
 const state = computed(() => props.state)
 const apiConfig = computed(() => state.value.panelViewModels.apiConfig)
@@ -420,6 +459,32 @@ const editingUsageProviderType = computed(() => editingUsageSlot.value ? getUsag
 const isEditingUsageSubscriptionBridge = computed(() => isSubscriptionBridgeProvider(editingUsageProviderType.value))
 const isEditingUsageAgySubscriptionBridge = computed(() => isEditingUsageSubscriptionBridge.value
   && !subscriptionBridgeReturnsThinkingSummary(editingUsageProviderType.value))
+const editingUsageShowsEffort = computed(() => (
+  editingUsageProviderType.value === 'codex-subscription'
+  || editingUsageProviderType.value === 'claude-code'
+))
+const editingUsageEffortOptions = computed(() => {
+  if (!editingUsageSlot.value || !editingUsageShowsEffort.value) return []
+  const options = getModelReasoningEffortOptions(
+    editingUsageProviderType.value,
+    getEffectiveUsageModel(editingUsageSlot.value),
+    usageModelCatalogs.value[editingUsageSlot.value] || []
+  )
+  const savedEffort = normalizeModelReasoningEffort(getUsageConfig(editingUsageSlot.value).effort)
+  return savedEffort && !options.some((option) => option.reasoningEffort === savedEffort)
+    ? [...options, { reasoningEffort: savedEffort, description: t('mobile.apiWs.savedEffort') }]
+    : options
+})
+const editingUsageDefaultEffortLabel = computed(() => {
+  if (!editingUsageSlot.value) return t('mobile.apiWs.followModelDefault')
+  const effort = getModelDefaultReasoningEffort(
+    getEffectiveUsageModel(editingUsageSlot.value),
+    usageModelCatalogs.value[editingUsageSlot.value] || []
+  )
+  return effort
+    ? t('mobile.apiWs.followModelDefaultWithValue', { effort })
+    : t('mobile.apiWs.followModelDefault')
+})
 const editingUsageFastAvailable = computed(() => {
   if (!editingUsageSlot.value || editingUsageProviderType.value !== 'codex-subscription') return false
   const config = getUsageConfig(editingUsageSlot.value)
@@ -541,7 +606,9 @@ function cloneAgentConfig(source: Partial<AgentModelConfig> = {}): AgentModelCon
     name: source.name || defaultBrainAgentConfig.name,
     agentType: source.agentType || defaultBrainAgentConfig.agentType,
     modelUsageConfigs,
-    embeddingPresetId: '',
+    embeddingPresetId: text(source.embeddingPresetId),
+    embeddingModel: text(source.embeddingModel),
+    embeddingDimensions: normalizeEmbeddingDimensions(source.embeddingDimensions),
     intentSnapshotMode: normalizeIntentSnapshotMode(source.intentSnapshotMode),
     recallCandidateMode: normalizeRecallCandidateMode(source.recallCandidateMode),
     recallContentStrategy: normalizeRecallContentStrategy(source.recallContentStrategy),
@@ -688,6 +755,7 @@ function updateUsageConfig(slotId: ModelUsageSlotId, changes: Partial<ModelUsage
       temperature: changes.temperature !== undefined ? normalizeTemperature(changes.temperature, item.temperature) : item.temperature,
       maxTokens: changes.maxTokens !== undefined ? normalizeMaxTokens(changes.maxTokens, item.maxTokens) : item.maxTokens,
       thinking: changes.thinking !== undefined ? normalizeThinking(changes.thinking, item.thinking) : item.thinking,
+      effort: changes.effort === undefined ? item.effort : normalizeModelReasoningEffort(changes.effort),
       serviceTier: changes.serviceTier === undefined ? item.serviceTier : (changes.serviceTier === 'fast' ? 'fast' : '')
     }
   })
@@ -756,7 +824,7 @@ function selectUsagePreset(slotId: ModelUsageSlotId, presetName: string) {
   const nextCatalogs = { ...usageModelCatalogs.value }
   delete nextCatalogs[slotId]
   usageModelCatalogs.value = nextCatalogs
-  updateUsageConfig(slotId, { presetName, model: '', serviceTier: '' })
+  updateUsageConfig(slotId, { presetName, model: '', effort: '', serviceTier: '' })
 }
 
 function selectUsageModel(slotId: ModelUsageSlotId, model: string) {
@@ -765,13 +833,19 @@ function selectUsageModel(slotId: ModelUsageSlotId, model: string) {
 
 function updateUsageModel(slotId: ModelUsageSlotId, model: string) {
   const current = getUsageConfig(slotId)
+  const effortOptions = getModelReasoningEffortOptions(
+    getUsageProviderType(slotId),
+    model || 'default',
+    usageModelCatalogs.value[slotId] || []
+  )
+  const keepEffort = !current.effort || effortOptions.some((option) => option.reasoningEffort === current.effort)
   const keepFast = current.serviceTier === 'fast' && modelSupportsServiceTier(
     getUsageProviderType(slotId),
     model || 'default',
     usageModelCatalogs.value[slotId] || [],
     'fast'
   )
-  updateUsageConfig(slotId, { model, serviceTier: keepFast ? 'fast' : '' })
+  updateUsageConfig(slotId, { model, effort: keepEffort ? current.effort : '', serviceTier: keepFast ? 'fast' : '' })
 }
 
 function toggleEditingUsageFast() {
@@ -813,6 +887,60 @@ async function loadUsageModels(slotId: ModelUsageSlotId) {
   }
 }
 
+const embeddingPresetOptions = computed(() => apiPresets.value.filter((preset) => {
+  const provider = normalizeAiProviderType((preset as Record<string, unknown>).providerType
+    ?? (preset as Record<string, unknown>).provider_type)
+  return !isKeylessAiProvider(provider)
+}))
+
+const selectedEmbeddingPreset = computed(() => {
+  const name = text(draftAgentConfig.value.embeddingPresetId)
+  return embeddingPresetOptions.value.find((preset) => text(preset.name) === name) || null
+})
+
+function selectEmbeddingPreset(presetName: string) {
+  draftAgentConfig.value = cloneAgentConfig({
+    ...draftAgentConfig.value,
+    embeddingPresetId: text(presetName),
+    embeddingModel: ''
+  })
+  embeddingModelOptions.value = []
+}
+
+function updateEmbeddingModel(model: string) {
+  draftAgentConfig.value = cloneAgentConfig({ ...draftAgentConfig.value, embeddingModel: text(model) })
+}
+
+function updateEmbeddingDimensions(value: number) {
+  draftAgentConfig.value = cloneAgentConfig({
+    ...draftAgentConfig.value,
+    embeddingDimensions: normalizeEmbeddingDimensions(value)
+  })
+}
+
+async function loadEmbeddingModels() {
+  const preset = selectedEmbeddingPreset.value
+  if (!preset) return
+  embeddingModelLoading.value = true
+  try {
+    const response = await fetch(API.AI_MODELS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ presetName: preset.name })
+    })
+    const data = await response.json() as { data?: AiModelCatalogItem[]; error?: string }
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`)
+    embeddingModelOptions.value = Array.isArray(data.data)
+      ? data.data.map((item) => text(item?.id)).filter(Boolean)
+      : []
+  } catch (error) {
+    console.error('加载嵌入模型列表失败:', error)
+    embeddingModelOptions.value = []
+  } finally {
+    embeddingModelLoading.value = false
+  }
+}
+
 async function saveAgentSettings() {
   const next = cloneAgentConfig({
     ...draftAgentConfig.value,
@@ -821,7 +949,6 @@ async function saveAgentSettings() {
     recallContentStrategy: normalizeRecallContentStrategy(draftAgentConfig.value.recallContentStrategy),
     writeBackAuditLogLevel: normalizeWriteBackAuditLogLevel(draftAgentConfig.value.writeBackAuditLogLevel),
     writeBackMaxReviewRounds: Math.max(1, Math.min(10, Math.trunc(toNumber(draftAgentConfig.value.writeBackMaxReviewRounds, 3)))),
-    embeddingPresetId: '',
     enabled: true
   })
   draftAgentConfig.value = next

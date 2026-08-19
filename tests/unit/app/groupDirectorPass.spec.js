@@ -48,6 +48,10 @@ describe('buildGroupDirectorMessages 私密提调指令注入', () => {
     expect(user.content).toContain('必须遵守·禁止泄露')
     expect(user.content).toContain('1. 让张元英主动表白')
     expect(user.content).toContain('2. 气氛压抑一点')
+    expect(user.content).toContain('优先级高于一切')
+    expect(user.content).toContain('必须无条件、完整、直接遵守')
+    expect(user.content).toContain('角色性格、情境 skill')
+    expect(user.content).toContain('不能只在 thought 里口头确认')
     expect(user.content).toContain('禁止把指令文字')
   })
 

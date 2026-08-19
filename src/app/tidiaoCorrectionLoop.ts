@@ -28,6 +28,8 @@
  */
 
 import { runAgentRuntime, type AgentRuntimeProgressEvent } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import { HookRegistry } from './agentRuntime/hookRegistry'
 // 接缝重构（2026-06-30）：单一全局 registry 单例（TIDIAO_GLOBAL_TOOL_REGISTRY）已退役（见 tidiaoGlobalTools.ts 顶部退役说明），
 // 本 loop 改按「当轮接缝在位与否」调工厂各自 new 自己的 ToolRegistry（工厂定义集中 tidiaoGlobalTools.ts，见其工厂清单）；
@@ -1025,10 +1027,23 @@ export async function runTidiaoCorrectionLoop(
     }
   }])
 
+  const runtimeVersion = precisionOnly ? 'tidiao-precision-edit-loop-v1' : 'tidiao-correction-loop-v1'
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId,
+    runtimeVersion,
+    traceIds: input.brief.targets.slice(0, 3).map((target) => target.ref)
+  })
   const runtimeResult = await runAgentRuntime({
     agentName: precisionOnly ? 'TidiaoPrecisionEditAgent' : 'TidiaoCorrectionAgent',
-    runtimeVersion: precisionOnly ? 'tidiao-precision-edit-loop-v1' : 'tidiao-correction-loop-v1',
+    runtimeVersion,
     messages,
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: profileId,
+      runId: journalPreparation.runId,
+      goal: input.brief?.instruction,
+      messages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     // 接缝重构 Step1：本 loop 自建 toolRegistry（按接缝在位调工厂·见上）+ deferred 模式——recommendedTools（编辑桶 9 常用·
     // 初始激活带 schema）+ toolsearch 越权决定可见/可调。registry 成员＝当轮真有 context 的工具（取代 B3 隐藏·越权目录等价）。
     toolRegistry,

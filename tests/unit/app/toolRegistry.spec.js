@@ -30,6 +30,16 @@ describe('toOpenAiTools', () => {
     ])
     expect(tools.map((t) => t.function.name)).toEqual(['fetchUnitDetail'])
   })
+
+  it('原生 tools 数组按显式 order 后接 name 排序，schema 对象键仍规范化', () => {
+    const tools = toOpenAiTools([
+      { name: 'zeta', brief: 'Z', schema: { properties: {}, type: 'object' } },
+      { name: 'beta', brief: 'B', order: -1, schema: { type: 'object', properties: {} } },
+      { name: 'alpha', brief: 'A', schema: { type: 'object', properties: {} } }
+    ])
+    expect(tools.map((tool) => tool.function.name)).toEqual(['beta', 'alpha', 'zeta'])
+    expect(Object.keys(tools[2].function.parameters)).toEqual(['properties', 'type'])
+  })
 })
 
 describe('coerceArgsBySchema（字段值字符串化纠形·2026-07-08 订阅桥真机 writeTodo 首发连败）', () => {
@@ -112,5 +122,22 @@ describe('ToolRegistry listBriefs / listCatalog（接缝重构后·工具集成�
     expect(matchToolsByQuery(catalog, '改 提示词')[0]).toBe('editMessagePrompt')
     expect(matchToolsByQuery(catalog, '')).toEqual([])
     expect(matchToolsByQuery(catalog, '不存在的能力')).toEqual([])
+  })
+
+  it('list/listBriefs/listCatalog 由显式 order 后接 name 稳定排序，不依赖注册顺序', () => {
+    const definitions = [
+      { name: 'zeta', brief: 'Z', execute: noop },
+      { name: 'beta', brief: 'B', order: -1, execute: noop },
+      { name: 'alpha', brief: 'A', execute: noop },
+      { name: 'gamma', brief: 'G', order: 2, execute: noop }
+    ]
+    const forward = new ToolRegistry(definitions)
+    const reverse = new ToolRegistry([...definitions].reverse())
+    const expected = ['beta', 'alpha', 'zeta', 'gamma']
+
+    expect(forward.list().map((tool) => tool.name)).toEqual(expected)
+    expect(reverse.list().map((tool) => tool.name)).toEqual(expected)
+    expect(forward.listBriefs().map((tool) => tool.name)).toEqual(expected)
+    expect(forward.listCatalog().map((tool) => tool.name)).toEqual(expected)
   })
 })

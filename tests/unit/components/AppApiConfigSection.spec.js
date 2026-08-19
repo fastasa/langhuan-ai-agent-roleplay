@@ -463,7 +463,7 @@ describe('AppApiConfigSection', () => {
     expect(rowsText).toContain('校书')
     expect(rowsText).toContain('执笔（消息）')
     expect(rowsText).toContain('掌阁')
-    // 编目=嵌入展示行（服务端管理默认·暂不开放自选）。
+    // 编目=嵌入独立配置行。
     expect(rowsText).toContain('编目（嵌入）')
     // 旧九槽行名不再出现（「角色消息/旁白/星依」等词还会出现在校书行 hint 里描述归属，不列入）。
     for (const legacyLabel of ['快判1', '快判2', '均衡模型', '编排模型', '高量模型', '高智模型']) {
@@ -553,10 +553,15 @@ describe('AppApiConfigSection', () => {
     await balancedRow.findAll('button').find((button) => button.text() === '参数').trigger('click')
     await nextTick()
 
-    expect(document.body.textContent).not.toContain('努力程度')
+    await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1))
+    expect(document.body.textContent).toContain('努力程度')
     expect(document.body.textContent).toContain('返回思考摘要')
     expect(document.body.textContent).not.toContain('温度')
-    await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1))
+    const effortSelectElement = Array.from(document.body.querySelectorAll('select'))
+      .find((select) => Array.from(select.options).some((option) => option.value === 'xhigh'))
+    expect(effortSelectElement).toBeTruthy()
+    expect(Array.from(effortSelectElement.options).find((option) => option.value === '')?.textContent).toContain('low')
+    await new DOMWrapper(effortSelectElement).setValue('xhigh')
     const fastButtonElement = Array.from(document.body.querySelectorAll('button'))
       .find((button) => button.textContent === 'Fast')
     expect(fastButtonElement).toBeTruthy()
@@ -572,12 +577,12 @@ describe('AppApiConfigSection', () => {
     expect(actions.updateAgentModelConfig).toHaveBeenCalledWith(expect.objectContaining({
       changes: expect.objectContaining({
         modelUsageConfigs: expect.arrayContaining([
-          expect.objectContaining({ id: 'balanced', thinking: 'enabled', serviceTier: 'fast' })
+          expect.objectContaining({ id: 'balanced', effort: 'xhigh', thinking: 'enabled', serviceTier: 'fast' })
         ])
       })
     }))
     const savedConfigs = actions.updateAgentModelConfig.mock.calls.at(-1)[0].changes.modelUsageConfigs
-    expect(savedConfigs.find((item) => item.id === 'balanced')).not.toHaveProperty('effort')
+    expect(savedConfigs.find((item) => item.id === 'balanced').effort).toBe('xhigh')
 
     wrapper.unmount()
     global.fetch = originalFetch
@@ -611,6 +616,7 @@ describe('AppApiConfigSection', () => {
     await nextTick()
 
     expect(document.body.textContent).toContain('思考摘要（AGY 暂不回传）')
+    expect(document.body.textContent).not.toContain('努力程度')
     expect(document.body.textContent).not.toContain('温度')
     const thinkingSelectElement = Array.from(document.body.querySelectorAll('select'))
       .find((select) => Array.from(select.options).some((option) => option.textContent === '返回摘要'))
@@ -669,6 +675,56 @@ describe('AppApiConfigSection', () => {
             model: 'narration-fast'
           })
         ])
+      })
+    }))
+
+    wrapper.unmount()
+    global.fetch = originalFetch
+  })
+
+  it('编目行可选择本地预设、加载嵌入模型并保存向量维度', async () => {
+    const originalFetch = global.fetch
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ data: [{ id: 'text-embedding-local' }] })
+    }))
+    const actions = createActions()
+    const wrapper = mount(AppApiConfigSection, {
+      props: {
+        viewModel: createViewModel(),
+        actions
+      }
+    })
+
+    await wrapper.findAll('.api-config-tab')[1].trigger('click')
+    const usageCard = wrapper.findAll('.agent-review-card').find((card) => card.text().includes('模型用途'))
+    const embeddingRow = usageCard.findAll('.agent-usage-row').find((row) => row.text().includes('编目（嵌入）'))
+    expect(embeddingRow).toBeTruthy()
+    await embeddingRow.find('select').setValue('A')
+    const loadButton = embeddingRow.findAll('button').find((button) => button.text().includes('加载模型'))
+    await loadButton.trigger('click')
+    await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ presetName: 'A' })
+    })))
+    const modelOption = wrapper.findAll('.agent-narration-model-option').find((button) => button.text() === 'text-embedding-local')
+    expect(modelOption).toBeTruthy()
+    await modelOption.trigger('mousedown')
+
+    await embeddingRow.findAll('button').find((button) => button.text() === '参数').trigger('click')
+    await nextTick()
+    const dimensionSelectElement = Array.from(document.body.querySelectorAll('select'))
+      .find((select) => Array.from(select.options).some((option) => option.value === '2048'))
+    expect(dimensionSelectElement).toBeTruthy()
+    await new DOMWrapper(dimensionSelectElement).setValue('1024')
+    const doneButton = Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === '完成')
+    await new DOMWrapper(doneButton).trigger('click')
+
+    expect(actions.updateAgentModelConfig).toHaveBeenCalledWith(expect.objectContaining({
+      changes: expect.objectContaining({
+        embeddingPresetId: 'A',
+        embeddingModel: 'text-embedding-local',
+        embeddingDimensions: 1024
       })
     }))
 

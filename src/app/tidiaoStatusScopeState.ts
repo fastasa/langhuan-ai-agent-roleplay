@@ -1,6 +1,27 @@
 import { ref, type Ref } from 'vue'
 import type { XingyiStatusScopeRequest, XingyiStatusScopeSelection } from './xingyiStatusScopeTool'
 
+export interface TidiaoStatusScopeCharacterOption {
+  id: string
+  name: string
+  participantId: string
+}
+
+/** 把导演候选的角色主档 id 与会话参与者正式 id 合并成可跨确认卡传递的造册宿主候选。 */
+export function buildTidiaoStatusScopeCharacterOptions(
+  candidates: Array<{ characterId?: unknown; name?: unknown }>,
+  participantIdByCharacterId: ReadonlyMap<string, string>
+): TidiaoStatusScopeCharacterOption[] {
+  return candidates.map((candidate) => {
+    const id = String(candidate.characterId || '')
+    return {
+      id,
+      participantId: participantIdByCharacterId.get(id) || '',
+      name: String(candidate.name || '')
+    }
+  })
+}
+
 /**
  * 提调「建状态栏前 scope 确认」全局态（并行编排计划批次B·2026-07-10 非阻塞化，取代批次4 挂起-续跑形态）。
  *
@@ -20,8 +41,11 @@ export interface TidiaoStatusScopePendingState {
   sessionId: string
   /** 请求发起轮的锚用户消息 id（造册的大脑召回落池接缝 buildDirectorRecallPoolSeam 入场券·审计定位）。 */
   anchorMessageId: number
-  /** 会话成员（scope 卡角色单选 chip 选项=建栏宿主候选·与统筹 candidates 同源）。 */
-  characterOptions: Array<{ id: string; name: string }>
+  /**
+   * 会话成员（scope 卡角色单选 chip 选项=建栏宿主候选·与统筹 candidates 同源）。
+   * participantId 是状态栏 session_character 宿主的正式 id；必须随确认卡一直保留到造册落库。
+   */
+  characterOptions: TidiaoStatusScopeCharacterOption[]
   /** 本次逐卡确认队列；缺省时由 set 函数按 request 归一成单项队列。 */
   requests?: XingyiStatusScopeRequest[]
   currentIndex?: number

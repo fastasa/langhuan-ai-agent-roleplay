@@ -2086,7 +2086,7 @@ describe('useChatMessageOps', () => {
     }))
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/prompt-logs/by-message/45') && call[1]?.method === 'DELETE')).toBe(true)
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/bind-message') && call[1]?.method === 'PUT')).toBe(true)
-    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_1', 45)
+    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_1', 45, { promptLogMode: 'background' })
   })
 
   it('CAPS 角色消息按原提示词重试会被退役保护拦截', async () => {

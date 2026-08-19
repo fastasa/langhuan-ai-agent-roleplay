@@ -1,25 +1,46 @@
 {
   "version": 1,
   "atlas": {
-    "src": "/xingyi-pet/runtime/mascot.svg",
-    "width": 192,
-    "height": 208,
-    "format": "svg"
+    "src": "/xingyi-pet/runtime/spritesheet.webp",
+    "width": 1536,
+    "height": 624,
+    "format": "webp"
   },
-  "fallbackSrc": "/xingyi-pet/runtime/mascot.svg",
+  "fallbackSrc": "/xingyi-pet/xingyi-pet-idle-v2.png",
   "animations": {
     "idle": {
       "loop": true,
       "totalDurationMs": 1600,
       "frames": [
-        {
-          "sourceIndex": 0,
-          "x": 0,
-          "y": 0,
-          "width": 192,
-          "height": 208,
-          "durationMs": 1600
-        }
+        { "sourceIndex": 1, "x": 0, "y": 0, "width": 192, "height": 208, "durationMs": 400 },
+        { "sourceIndex": 2, "x": 192, "y": 0, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 3, "x": 384, "y": 0, "width": 192, "height": 208, "durationMs": 160 },
+        { "sourceIndex": 4, "x": 576, "y": 0, "width": 192, "height": 208, "durationMs": 80 },
+        { "sourceIndex": 5, "x": 768, "y": 0, "width": 192, "height": 208, "durationMs": 100 },
+        { "sourceIndex": 6, "x": 960, "y": 0, "width": 192, "height": 208, "durationMs": 160 },
+        { "sourceIndex": 7, "x": 1152, "y": 0, "width": 192, "height": 208, "durationMs": 500 }
+      ]
+    },
+    "hover-eager": {
+      "loop": false,
+      "totalDurationMs": 1500,
+      "frames": [
+        { "sourceIndex": 0, "x": 0, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 1, "x": 192, "y": 208, "width": 192, "height": 208, "durationMs": 100 },
+        { "sourceIndex": 2, "x": 384, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 3, "x": 576, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 4, "x": 768, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 5, "x": 960, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 6, "x": 1152, "y": 208, "width": 192, "height": 208, "durationMs": 200 },
+        { "sourceIndex": 7, "x": 1344, "y": 208, "width": 192, "height": 208, "durationMs": 200 }
+      ]
+    },
+    "hover-eager-exit": {
+      "loop": false,
+      "totalDurationMs": 300,
+      "frames": [
+        { "sourceIndex": 0, "x": 0, "y": 416, "width": 192, "height": 208, "durationMs": 160 },
+        { "sourceIndex": 1, "x": 192, "y": 416, "width": 192, "height": 208, "durationMs": 140 }
       ]
     }
   }

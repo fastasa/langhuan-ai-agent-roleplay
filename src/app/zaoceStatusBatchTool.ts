@@ -350,8 +350,16 @@ async function planPanels(input: {
       if (hostType === 'session_character') {
         const resolved = resolveStatusSystemItem(input.ctx.characterOptions || [], text(raw.host), '会话角色')
         if ('error' in resolved) return { error: errorResult(resolved.error, 'INVALID_ARGUMENT', { panelIndex: plan.index }) }
-        hostId = text(resolved.item.participantId || resolved.item.id)
-        if (!hostId) return { error: errorResult(`panels[${plan.index}] 的会话角色宿主缺少 participantId。`) }
+        hostId = text(resolved.item.participantId)
+        if (!hostId) {
+          return {
+            error: errorResult(
+              `panels[${plan.index}] 的会话角色宿主「${text(resolved.item.name) || text(raw.host)}」缺少正式 participantId，不能用 characterId 代替。请刷新会话成员后重试。`,
+              'TOOL_RUNTIME_ERROR',
+              { panelIndex: plan.index, characterId: text(resolved.item.id), host: text(raw.host) }
+            )
+          }
+        }
       } else if (hostType === 'temp_entity') {
         tempEntities ??= await input.ctx.repository.fetchTempEntities(input.ctx.sessionId)
         const resolved = resolveStatusSystemItem(tempEntities, text(raw.host), '临时实体')

@@ -83,7 +83,8 @@ export const docLibrary = {
     editSuffix: '編集'
   },
   topbar: {
-    promptTitle: 'プロンプト',
+    rolePromptTitle: 'キャラクタープロンプト',
+    scenarioPromptTitle: 'シチュエーションプロンプト',
     pageSearch: 'ページ検索',
     deletePage: 'ページを削除',
     deletePrompt: 'プロンプトを削除',

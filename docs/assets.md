@@ -1,11 +1,20 @@
 # 素材与第三方说明
 
-## 首发资产
+## 随项目分发的自有资产
 
-- `src/assets/langhuan-icon.svg`：项目自有的几何 SVG 图标；
-- `public/xingyi-pet/runtime/mascot.svg`：为开源版重绘的本地 SVG 桌宠占位图；
-- 纸张质感：纯 CSS 渐变，不携带来源不明的纹理图片；
-- 系统字体：只引用操作系统已有字体，不随发行包分发字体文件。
+下列视觉素材均为琅嬛项目自有素材，权利人已确认可以随开源版本再分发；它们与项目代码一同按 `AGPL-3.0-only` 提供：
+
+- `src/assets/langhuan-icon.png`：琅嬛应用图标；
+- `src/assets/illustrations/new-character-feather-pen.png`：角色创建弹窗标题插画；
+- `src/assets/illustrations/new-character-upload-placeholder.png`：角色头像上传占位插画；
+- `src/assets/illustrations/role-brain-empty-branch.png`：角色大脑空态插画；
+- `src/assets/illustrations/role-empty-arrow.png`：角色页空态引导箭头；
+- `src/assets/illustrations/role-empty-book.png`：角色页空态书本插画；
+- `public/xingyi-pet/xingyi-pet-idle-v2.png`：星依桌宠静态回退图；
+- `public/xingyi-pet/runtime/spritesheet.webp`：星依桌宠运行时动画图集；
+- `public/xingyi-pet/runtime/manifest.json`：动画帧与时序清单。
+
+纸张质感由纯 CSS 渐变生成；系统字体只引用操作系统已有字体，不随发行包分发字体文件。
 
 首发版不携带私人截图、角色立绘、聊天附件、世界观图片、音频、模型或演示数据库。
 

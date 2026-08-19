@@ -20,7 +20,7 @@
         </button>
       </div>
 
-      <label v-if="!promptDeep" class="mobile-doc-search">
+      <label v-if="!promptDeep && activeDocTab !== 'scenarioPrompts'" class="mobile-doc-search">
         <MobileLineIcon name="search" :size="16" :stroke-width="1.9" />
         <input v-model="searchText" type="search" :placeholder="activeDocTab === 'prompts' ? $t('mobile.docWs.searchPrompts') : $t('mobile.docWs.searchDocs')">
       </label>
@@ -52,6 +52,11 @@
         v-else-if="activeDocTab === 'prompts'"
         :search-text="searchText"
         @depth-change="promptDeep = $event"
+      />
+
+      <ScenarioPromptLibraryPanel
+        v-else-if="activeDocTab === 'scenarioPrompts'"
+        compact
       />
 
       <div v-else class="mobile-doc-placeholder">
@@ -114,6 +119,7 @@ import { fetchDocLibraryState, saveDocLibraryState } from '../../repositories/do
 import UnitRelationBrainView from '../app/UnitRelationBrainView.vue'
 import MobileMarkdownEditor from './MobileMarkdownEditor.vue'
 import MobilePromptLibrary from './MobilePromptLibrary.vue'
+import ScenarioPromptLibraryPanel from '../doc-library/ScenarioPromptLibraryPanel.vue'
 import type { DocLibraryStateSnapshot } from '../../types/docBrain'
 import type { RelationViewRecord, UnitView } from '../../types/unitView'
 import MobileGlassNav from './MobileGlassNav.vue'
@@ -126,7 +132,7 @@ import MobileTreeToolbar from './MobileTreeToolbar.vue'
 import type { MobileGlassNavItem, MobileSelectionAction, MobileSelectionDescriptor, MobileSoneNode, MobileTreeToolbarAction, MobileWorkspaceShellProps } from './mobileWorkspaceTypes'
 
 type DocPane = 'tree' | 'unit'
-type DocTab = 'world' | 'relation' | 'prompts'
+type DocTab = 'world' | 'relation' | 'prompts' | 'scenarioPrompts'
 type UnitMode = 'read' | 'edit' | 'relation'
 
 defineProps<MobileWorkspaceShellProps>()
@@ -141,7 +147,8 @@ const { t } = useI18n()
 const DOC_TAB_DEFS: Array<{ id: DocTab; labelKey: string }> = [
   { id: 'world', labelKey: 'mobile.docWs.tabWorld' },
   { id: 'relation', labelKey: 'mobile.docWs.relation' },
-  { id: 'prompts', labelKey: 'docLibrary.topbar.promptTitle' }
+  { id: 'prompts', labelKey: 'docLibrary.topbar.rolePromptTitle' },
+  { id: 'scenarioPrompts', labelKey: 'docLibrary.topbar.scenarioPromptTitle' }
 ]
 const docTabs = computed<Array<{ id: DocTab; label: string }>>(() =>
   DOC_TAB_DEFS.map((def) => ({ id: def.id, label: t(def.labelKey) }))

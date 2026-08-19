@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { assemblePromptFromMessages, assemblePromptFromSources } from '../../../src/app/promptAssemblyPipeline.ts'
+import {
+  PromptAssemblyValidationError,
+  assemblePromptFromMessages,
+  assemblePromptFromSources
+} from '../../../src/app/promptAssemblyPipeline.ts'
 
 describe('promptAssemblyPipeline', () => {
   it('按来源顺序生成模型消息、日志区块和审计摘要', () => {
@@ -192,6 +196,123 @@ describe('promptAssemblyPipeline', () => {
       policyId: 'final-messages',
       messageCount: 2,
       promptBlockCount: 2
+    }))
+  })
+
+  it('strict 默认关闭，旧调用仍会宽松归一非法字段并稳定保留同序输入', () => {
+    const result = assemblePromptFromSources({
+      sources: [
+        { id: 'first', role: 'invalid-role', kind: 'unknown-kind', content: '第一段', orderIndex: 'bad' },
+        { id: 'second', role: 'system', kind: 'manual', content: '第二段', orderIndex: 0 }
+      ]
+    })
+
+    expect(result.sources.map((source) => ({ id: source.id, role: source.role, kind: source.kind }))).toEqual([
+      { id: 'first', role: 'system', kind: 'other' },
+      { id: 'second', role: 'system', kind: 'manual' }
+    ])
+    expect(result.trace.strict).toBe(false)
+  })
+
+  it.each([
+    {
+      name: '非法 role',
+      code: 'prompt_source_invalid_role',
+      fragmentId: 'bad_role',
+      sources: [{ id: 'bad_role', role: 'tool', kind: 'manual', content: '正文' }]
+    },
+    {
+      name: '非法 kind',
+      code: 'prompt_source_invalid_kind',
+      fragmentId: 'bad_kind',
+      sources: [{ id: 'bad_kind', role: 'system', kind: 'not-a-kind', content: '正文' }]
+    },
+    {
+      name: '非法 orderIndex',
+      code: 'prompt_source_invalid_order',
+      fragmentId: 'bad_order',
+      sources: [{ id: 'bad_order', role: 'system', kind: 'manual', content: '正文', orderIndex: '1' }]
+    },
+    {
+      name: '重复 id',
+      code: 'prompt_source_duplicate_id',
+      fragmentId: 'duplicated',
+      sources: [
+        { id: 'duplicated', role: 'system', kind: 'manual', content: '第一段' },
+        { id: 'duplicated', role: 'user', kind: 'manual', content: '第二段' }
+      ]
+    },
+    {
+      name: '显式顺序冲突',
+      code: 'prompt_source_order_conflict',
+      fragmentId: 'second',
+      sources: [
+        { id: 'first', role: 'system', kind: 'manual', content: '第一段', orderIndex: 10 },
+        { id: 'second', role: 'user', kind: 'manual', content: '第二段', orderIndex: 10 }
+      ]
+    },
+    {
+      name: '未解析模板变量',
+      code: 'prompt_source_unresolved_template_variable',
+      fragmentId: 'template',
+      sources: [{ id: 'template', role: 'system', kind: 'manual', content: '你好，{{ characterName }}。' }]
+    }
+  ])('strict 对$name fail-fast，并返回稳定 code 和 fragmentId', ({ sources, code, fragmentId }) => {
+    try {
+      assemblePromptFromSources({ strict: true, sources })
+      throw new Error('预期 strict 校验失败')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PromptAssemblyValidationError)
+      expect(error).toMatchObject({ code, fragmentId })
+    }
+  })
+
+  it('基于最终规范化有序 fragments 生成确定 digest，且不受 metadata 和输入排列影响', () => {
+    const first = assemblePromptFromSources({
+      strict: true,
+      metadata: { generatedAt: '2026-08-18T12:00:00Z' },
+      sources: [
+        { id: 'user', kind: 'current_user_input', role: 'user', content: '继续。', orderIndex: 20, metadata: { traceTime: 1 } },
+        { id: 'system', kind: 'manual', role: 'system', content: '保持身份。', orderIndex: 10, metadata: { traceTime: 1 } }
+      ]
+    })
+    const second = assemblePromptFromSources({
+      strict: true,
+      metadata: { generatedAt: '2030-01-01T00:00:00Z' },
+      sources: [
+        { id: 'system', kind: 'manual', role: 'system', content: '保持身份。', orderIndex: 10, metadata: { traceTime: 999 } },
+        { id: 'user', kind: 'current_user_input', role: 'user', content: '继续。', orderIndex: 20, metadata: { traceTime: 999 } }
+      ]
+    })
+
+    expect(first.identity).toEqual(second.identity)
+    expect(first.identity).toEqual(expect.objectContaining({
+      schemaVersion: 'prompt-assembly-fragments-v1',
+      digest: expect.stringMatching(/^fnv1a32:[0-9a-f]{8}$/)
+    }))
+    expect(first.trace.assemblyDigest).toBe(first.identity.digest)
+    expect(first.identity.fragments.map((fragment) => fragment.id)).toEqual(['system', 'user'])
+  })
+
+  it('任一规范化 fragment 内容变化都会改变 assembly digest', () => {
+    const before = assemblePromptFromSources({
+      strict: true,
+      sources: [{ id: 'system', kind: 'manual', role: 'system', content: '版本一', orderIndex: 0 }]
+    })
+    const after = assemblePromptFromSources({
+      strict: true,
+      sources: [{ id: 'system', kind: 'manual', role: 'system', content: '版本二', orderIndex: 0 }]
+    })
+
+    expect(after.identity.digest).not.toBe(before.identity.digest)
+  })
+
+  it('assemblePromptFromMessages 也能 opt-in strict，而不会先吞掉非法 role', () => {
+    expect(() => assemblePromptFromMessages([
+      { role: 'tool', content: '工具正文' }
+    ], { strict: true, idPrefix: 'formal' })).toThrowError(expect.objectContaining({
+      code: 'prompt_source_invalid_role',
+      fragmentId: 'formal_1'
     }))
   })
 })

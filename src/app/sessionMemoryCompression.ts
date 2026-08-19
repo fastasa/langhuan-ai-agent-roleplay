@@ -10,7 +10,7 @@
  * - 折叠：保留最近 {@link SESSION_MEMORY_KEEP_RECENT} 条逐字（由 compress + 召回承接），把更早、且尚未折叠
  *   （messageId > watermark）的事实，用 AI 合并进已有滚动摘要。
  * - 节流：距上次折叠新增可折叠事实 ≥ {@link SESSION_MEMORY_REFRESH_STEP} 才重算，避免每轮都调模型。
- * - watermark：已折叠进摘要的最高 messageId（持久化在 chat_sessions.last_summary_time，复用零消费旧列）。
+ * - watermark：已折叠进摘要的最高 messageId（持久化在 chat_sessions.context_summary_message_id）。
  *
  * 安全默认：无摘要时注入侧完全不动（零回归）；本模块只产逻辑/提示词，真实 AI 调用与持久化由发送链路接。
  */

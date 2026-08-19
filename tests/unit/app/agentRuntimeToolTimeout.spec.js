@@ -37,10 +37,15 @@ describe('agentRuntime · 单工具执行超时（架构审查批B）', () => {
     expect(transcript.terminalReason).toBe('done')
     const result = transcript.turns[0].toolResults[0]
     expect(result.status).toBe('error')
-    expect(result.error.type).toBe('TOOL_RUNTIME_ERROR')
+    expect(result.error.type).toBe('TOOL_TIMEOUT')
     expect(result.error.message).toContain('工具执行超时')
     expect(result.error.message).toContain('hang')
-    expect(result.details).toMatchObject({ timedOut: true, timeoutMs: DEFAULT_TOOL_EXECUTE_TIMEOUT_MS })
+    expect(result.details).toMatchObject({
+      timedOut: true,
+      timeoutMs: DEFAULT_TOOL_EXECUTE_TIMEOUT_MS,
+      abortRequested: true,
+      outcomeUnknown: true
+    })
   })
 
   it('longRunning:true 的工具不受默认超时影响：超过阈值仍继续等待直到真正完成', async () => {
@@ -90,5 +95,66 @@ describe('agentRuntime · 单工具执行超时（架构审查批B）', () => {
     expect(result.status).toBe('error')
     expect(result.error.message).toBe('炸了')
     expect(result.details?.timedOut).toBeUndefined()
+  })
+
+  it('timeoutMs 可逐工具覆盖，并把派生 AbortSignal 传给 execute', async () => {
+    vi.useFakeTimers()
+    let receivedSignal
+    const registry = new ToolRegistry([{
+      name: 'customDeadline',
+      brief: '自定义截止时间',
+      timeoutMs: 1234,
+      execute: (_call, ctx) => {
+        receivedSignal = ctx.signal
+        return new Promise((_resolve, reject) => {
+          ctx.signal.addEventListener('abort', () => reject(new Error('cooperative cancel')), { once: true })
+        })
+      }
+    }])
+    const runPromise = runOnce(registry, 'customDeadline')
+    await vi.advanceTimersByTimeAsync(1234)
+    const { transcript } = await runPromise
+    const result = transcript.turns[0].toolResults[0]
+
+    expect(receivedSignal).toBeInstanceOf(AbortSignal)
+    expect(receivedSignal.aborted).toBe(true)
+    expect(result.error.type).toBe('TOOL_TIMEOUT')
+    expect(result.details).toMatchObject({ timeoutMs: 1234, abortRequested: true })
+  })
+
+  it('可能有副作用的工具超时后明确标记 outcomeUnknown', async () => {
+    vi.useFakeTimers()
+    const registry = new ToolRegistry([{
+      name: 'possibleWrite',
+      brief: '可能已经写入',
+      timeoutMs: 100,
+      mayHaveSideEffects: true,
+      execute: () => new Promise(() => {})
+    }])
+    const runPromise = runOnce(registry, 'possibleWrite')
+    await vi.advanceTimersByTimeAsync(100)
+    const { transcript } = await runPromise
+
+    expect(transcript.turns[0].toolResults[0].details).toMatchObject({ outcomeUnknown: true })
+  })
+
+  it('timeoutMs:null 与 longRunning 一样显式免除 deadline', async () => {
+    vi.useFakeTimers()
+    const registry = new ToolRegistry([{
+      name: 'explicitNoDeadline',
+      brief: '显式不设截止时间',
+      timeoutMs: null,
+      execute: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ content: 'done-without-deadline' }), DEFAULT_TOOL_EXECUTE_TIMEOUT_MS + 5)
+      })
+    }])
+    const runPromise = runOnce(registry, 'explicitNoDeadline')
+    await vi.advanceTimersByTimeAsync(DEFAULT_TOOL_EXECUTE_TIMEOUT_MS + 10)
+    const { transcript } = await runPromise
+
+    expect(transcript.turns[0].toolResults[0]).toMatchObject({
+      status: 'success',
+      content: 'done-without-deadline'
+    })
   })
 })

@@ -150,6 +150,7 @@ export function applyChatSnapshotPartition(
         summary: toText(session?.summary, ''),
         last_summary_time: toText(session?.lastSummaryTime ?? session?.last_summary_time, ''),
         context_summary: toText(session?.contextSummary ?? session?.context_summary, ''),
+        context_summary_message_id: toNum(session?.contextSummaryMessageId ?? session?.context_summary_message_id, 0),
         caps_residue_state_json: '{}',
         loaded_summary_ids: toJson(session?.loadedSummaryIds ?? session?.loaded_summary_ids, []),
         virtual_scene_name: toText(session?.virtualSceneName ?? session?.virtual_scene_name, ''),
@@ -868,6 +869,11 @@ export function applyChatSnapshotPartition(
         scenarioSummary: toText(item?.scenarioSummary ?? item?.scenario_summary, ''),
         anchorMessageId: toText(item?.anchorMessageId ?? item?.anchor_message_id, ''),
         sourceArtifactId: toText(item?.sourceArtifactId ?? item?.source_artifact_id, ''),
+        dependencySnapshotJson: parseSnapshotObject(
+          item?.dependencySnapshot
+          ?? item?.dependencySnapshotJson
+          ?? item?.dependency_snapshot_json
+        ),
         version: Math.max(1, toNum(item?.version, 1)), source: toText(item?.source, 'snapshot_restore'),
         createdAt: toText(item?.createdAt ?? item?.created_at, new Date().toISOString()),
         updatedAt: toText(item?.updatedAt ?? item?.updated_at, new Date().toISOString())

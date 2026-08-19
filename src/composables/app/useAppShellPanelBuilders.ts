@@ -415,7 +415,7 @@ async function runProjectionWritebackForCharacters(ctx: any, input: {
   const results: Array<{ characterId: string; characterName: string; result: Record<string, unknown> | null; error?: unknown }> = []
   if (input.sourceMessageId && input.sourceMessageId > 0) {
     try {
-      await runChatMessageProjectionBySessionId(input.sessionId, input.sourceMessageId)
+      await runChatMessageProjectionBySessionId(input.sessionId, input.sourceMessageId, { promptLogMode: 'background' })
     } catch (error) {
       console.warn('写轨迹前补消息投影失败:', error)
     }

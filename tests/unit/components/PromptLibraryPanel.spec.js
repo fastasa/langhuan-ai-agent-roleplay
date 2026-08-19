@@ -106,4 +106,50 @@ describe('PromptLibraryPanel', () => {
       content: SCENARIO_MOUNTED_PROMPTS_PLACEHOLDER
     }))
   })
+
+  it('长正文交给浏览器原生粘贴并留在 DOM 缓冲，保存时完整读取', async () => {
+    const store = useSettingStore()
+    vi.spyOn(store, 'ensureBuiltinPromptPresets').mockResolvedValue()
+    const updateSpy = vi.spyOn(store, 'updatePromptPreset').mockResolvedValue()
+    store.promptPresets = [{
+      id: 'prompt_long',
+      name: '长提示词',
+      content: '旧正文',
+      role: 'system',
+      scene: 'chat',
+      frequency: 'always',
+      enabled: true,
+      orderIndex: 0
+    }]
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    const textarea = wrapper.find('.prompt-library__textarea')
+    textarea.element.setSelectionRange(0, textarea.element.value.length)
+    const pastedText = `${'长提示词正文\n'.repeat(20_000)}结束`
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: { getData: vi.fn((type) => type === 'text/plain' ? pastedText : '') }
+    })
+
+    textarea.element.dispatchEvent(pasteEvent)
+    expect(pasteEvent.defaultPrevented).toBe(false)
+
+    // jsdom 不执行浏览器的默认粘贴动作，这里补上原生 textarea 随后产生的 value/input。
+    textarea.element.value = pastedText
+    await textarea.trigger('input')
+    await wrapper.vm.$nextTick()
+
+    expect(textarea.element.value).toHaveLength(pastedText.length)
+    expect(textarea.element.value.startsWith('长提示词正文\n')).toBe(true)
+    expect(textarea.element.value.endsWith('结束')).toBe(true)
+    expect(wrapper.find('.prompt-library__primary-btn').attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('.prompt-library__primary-btn').trigger('click')
+    await flushPromises()
+    const savedContent = updateSpy.mock.calls[0]?.[1]?.content || ''
+    expect(savedContent).toHaveLength(pastedText.length)
+    expect(savedContent.startsWith('长提示词正文\n')).toBe(true)
+    expect(savedContent.endsWith('结束')).toBe(true)
+  })
 })

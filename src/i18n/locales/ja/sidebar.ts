@@ -11,7 +11,6 @@ export const sidebar = {
   filterCrowd: 'モブキャラクター',
   filterArchived: 'アーカイブ済み',
   createSession: '新規チャット',
-  emptySessions: 'チャットがありません',
   navContacts: 'チャット',
   navRoles: 'キャラクター',
   navDocs: 'ドキュメントライブラリ',

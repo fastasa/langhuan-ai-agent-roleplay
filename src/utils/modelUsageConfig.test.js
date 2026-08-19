@@ -114,6 +114,7 @@ describe('modelTaskTiers（任务分级表）', () => {
     expect(MODEL_TASK_TIERS).toEqual({
       // 2026-07-10 状态系统融入提调计划：统筹升掌阁（directorLoop 一个 id 管统筹/纠偏/精修三处同升）。
       directorLoop: 'smart',
+      replyRouteJudge: 'fast',
       focusedActionJudge: 'fast',
       replyPlanMain: 'balanced',
       replyPlanLite: 'balanced',
@@ -129,6 +130,7 @@ describe('modelTaskTiers（任务分级表）', () => {
       recallJudge: 'balanced',
       recallFormat: 'fast',
       messageProjection: 'fast',
+      xingyiDiary: 'balanced',
       improvCharacterExtract: 'smart',
       projectionWriteback: 'balanced',
       sessionTempProfile: 'balanced',

@@ -2,15 +2,15 @@ import type { AgentModelConfig, ModelReasoningEffort, ModelServiceTier, ModelThi
 
 // 槽位级最短间隔(minIntervalSeconds)已于第二阶段批次 F 整体下线：
 // 「两次调用最短间隔」真值统一迁到 ApiPreset.min_interval（凭据级、本地服务执行），
-// 槽位只保留预设/模型/温度/maxTokens/thinking/serviceTier；effort 已迁到具体 Agent 对话。
+// 槽位保留预设/模型/温度/maxTokens/thinking/effort/serviceTier；具体 Agent 对话仍可临时覆盖 effort。
 //
 // 文本槽四值：书童 fast / 校书 balanced / 执笔 message / 掌阁 smart（+编目=嵌入独立链路）。
 // 执笔只承接角色消息与旁白正文；旧配置首次读取时继承校书，保证升级前后路由不突变。
 export const DEFAULT_MODEL_USAGE_CONFIGS: ModelUsageConfig[] = [
-  { id: 'fast', label: '书童', presetName: '', model: '', temperature: 0.2, maxTokens: 256, thinking: 'disabled', serviceTier: '' },
-  { id: 'balanced', label: '校书', presetName: '', model: '', temperature: 0.7, maxTokens: 1024, thinking: 'disabled', serviceTier: '' },
-  { id: 'message', label: '执笔', presetName: '', model: '', temperature: 0.7, maxTokens: 1024, thinking: 'disabled', serviceTier: '' },
-  { id: 'smart', label: '掌阁', presetName: '', model: '', temperature: 0.4, maxTokens: 1024, thinking: 'enabled', serviceTier: '' }
+  { id: 'fast', label: '书童', presetName: '', model: '', temperature: 0.2, maxTokens: 256, thinking: 'disabled', effort: '', serviceTier: '' },
+  { id: 'balanced', label: '校书', presetName: '', model: '', temperature: 0.7, maxTokens: 1024, thinking: 'disabled', effort: '', serviceTier: '' },
+  { id: 'message', label: '执笔', presetName: '', model: '', temperature: 0.7, maxTokens: 1024, thinking: 'disabled', effort: '', serviceTier: '' },
+  { id: 'smart', label: '掌阁', presetName: '', model: '', temperature: 0.4, maxTokens: 1024, thinking: 'enabled', effort: '', serviceTier: '' }
 ]
 
 function normalizeThinking(value: unknown, fallback: ModelThinkingMode): ModelThinkingMode {
@@ -33,6 +33,33 @@ export function normalizeModelReasoningEffort(value: unknown, fallback: ModelRea
   const next = String(value ?? '').trim()
   if (!next) return ''
   return /^[A-Za-z0-9._:-]{1,64}$/.test(next) ? next : fallback
+}
+
+export function normalizeEmbeddingDimensions(value: unknown, fallback = 512): number {
+  const numeric = Number(value)
+  return [256, 512, 1024, 2048].includes(numeric) ? numeric : fallback
+}
+
+export function resolveEmbeddingModelConfig(
+  agentConfig: Partial<AgentModelConfig> | Record<string, unknown> | null | undefined
+): { presetId: string; model: string; dimensions: number } {
+  const record = agentConfig && typeof agentConfig === 'object' ? agentConfig as Record<string, unknown> : {}
+  return {
+    presetId: String(record.embeddingPresetId ?? record.embedding_preset_id ?? '').trim(),
+    model: String(record.embeddingModel ?? record.embedding_model ?? '').trim(),
+    dimensions: normalizeEmbeddingDimensions(record.embeddingDimensions ?? record.embedding_dimensions)
+  }
+}
+
+export function buildEmbeddingCacheScope(
+  agentConfig: Partial<AgentModelConfig> | Record<string, unknown> | null | undefined
+): string {
+  const config = resolveEmbeddingModelConfig(agentConfig)
+  return JSON.stringify([
+    config.presetId || 'default',
+    config.model || 'preset-default',
+    config.dimensions
+  ])
 }
 
 function normalizeMaxTokens(value: unknown, fallback: number): number {
@@ -131,6 +158,7 @@ export function normalizeModelUsageConfigs(
       temperature: Number(raw.temperature),
       maxTokens: Number(raw.maxTokens ?? raw.max_tokens),
       thinking: normalizeThinking(raw.thinking, 'disabled'),
+      effort: normalizeModelReasoningEffort(raw.effort),
       serviceTier: normalizeServiceTier(raw.serviceTier ?? raw.service_tier)
     })
   })
@@ -167,6 +195,7 @@ export function normalizeModelUsageConfigs(
       temperature: normalizeTemperature(current?.temperature ?? legacy.temperature, fallback.temperature),
       maxTokens: normalizeMaxTokens(current?.maxTokens ?? legacy.maxTokens, fallback.maxTokens),
       thinking: normalizeThinking(current?.thinking ?? legacy.thinking, fallback.thinking),
+      effort: normalizeModelReasoningEffort(current?.effort, fallback.effort),
       serviceTier: normalizeServiceTier(current?.serviceTier, fallback.serviceTier)
     }
   })
@@ -183,8 +212,7 @@ export function getModelUsageConfig(
 export function buildModelUsageAiOptions(
   agentConfig: Partial<AgentModelConfig> | null | undefined,
   slotId: ModelUsageSlotId,
-  overrides: Partial<Pick<ModelUsageConfig, 'maxTokens' | 'temperature' | 'thinking'>>
-    & { effort?: ModelReasoningEffort } = {}
+  overrides: Partial<Pick<ModelUsageConfig, 'maxTokens' | 'temperature' | 'thinking' | 'effort'>> = {}
 ) {
   const config = getModelUsageConfig(agentConfig, slotId)
   return {
@@ -192,8 +220,8 @@ export function buildModelUsageAiOptions(
     presetName: config.presetName,
     model: config.model,
     temperature: normalizeTemperature(overrides.temperature, config.temperature),
-    // 努力程度是 Agent 对话级覆盖，不再从全局模型槽配置继承；空串=跟随模型默认。
-    effort: normalizeModelReasoningEffort(overrides.effort),
+    // 单次 Agent 对话显式给 effort（包括空串）时覆盖槽位；未给则继承槽位参数。
+    effort: normalizeModelReasoningEffort(overrides.effort === undefined ? config.effort : overrides.effort),
     maxTokens: normalizeMaxTokens(overrides.maxTokens, config.maxTokens),
     thinking: normalizeThinking(overrides.thinking, config.thinking),
     ...(config.serviceTier === 'fast' ? { serviceTier: 'fast' as const } : {})

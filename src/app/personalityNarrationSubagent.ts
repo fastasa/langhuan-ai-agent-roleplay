@@ -1,4 +1,6 @@
 import { runAgentRuntime, type AgentRuntimeMessage, type ParsedAgentModelOutput } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import type { AgentRuntimeHistoryMessage, AgentTranscript, ToolCallMessage } from './agentRuntime/types'
 import { type BuiltinNarrationKind, type NarrationProfile } from './narrationProtocol'
 // R1-B B5-2 item2c：旁白两件套解耦——buildNarrationBusinessContext 产出统一接缝（工具定义已迁全局 tidiaoGlobalTools·读本接缝）。
@@ -10,6 +12,7 @@ import { ToolRegistry } from './agentRuntime/toolRegistry'
 import { assembleAgentSkillSupply, resolveAgentRuntimeToolSupply } from './agentSupply'
 // 旁白 generatedPrompt 编写指南（四处共用同一份）已收进 agentProtocols 集中目录（用户 2026-06-29），此处只引用。
 import { NARRATION_GENERATED_PROMPT_AUTHORING_GUIDE } from './agentProtocols'
+import { DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL } from './directorDirective'
 
 type CallModel = (request: {
   messages: AgentRuntimeMessage[]
@@ -297,7 +300,8 @@ export function buildNarrationUserDirectiveProtocol(directives: string[] | undef
   return [
     '【用户私密指令·只给提调看】用户本轮用双层方括号给提调下了只有你能看到的私密安排：',
     list,
-    '① 让你这轮「是否插入旁白、旁白聚焦谁做什么、营造什么基调」朝这条私密安排的方向走，它的优先级高于你对当前场景的常规判断。',
+    DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL,
+    '① 必须让这轮「是否插入旁白、旁白聚焦谁做什么、营造什么基调」完整落实私密安排，不能只口头确认或自行稀释。',
     '② 绝不能把这条指令的文字、含义或「用户下过私密指令」这件事写进 generatedPrompt 或旁白正文——旁白正文会展示给用户和角色、角色并不知情，只让它影响旁白方向，不让它现身于任何文字。'
   ].join('\n')
 }
@@ -491,10 +495,23 @@ export async function runPersonalityNarrationSubagent(input: PersonalityNarratio
   const subagentMessages = buildPersonalityNarrationSubagentMessages({ ...input, profiles, maxCalls })
   const toolRegistry = new ToolRegistry([createReadNarrationSkillTool(narrationCtx), createConfirmNarrationCallTool(narrationCtx)])
   const toolSupply = resolveAgentRuntimeToolSupply('role_reply.personality-narration', toolRegistry)
+  const runtimeVersion = 'personality-narration-subagent-v1'
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId: 'role_reply.personality-narration',
+    runtimeVersion,
+    traceIds: [input.characterName]
+  })
   const runtimeResult = await runAgentRuntime({
     agentName: 'PersonalityNarrationSubagent',
-    runtimeVersion: 'personality-narration-subagent-v1',
+    runtimeVersion,
     messages: subagentMessages,
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: 'role_reply.personality-narration',
+      runId: journalPreparation.runId,
+      goal: input.currentUserInput || input.roundNarrationDirective || input.scenario,
+      messages: subagentMessages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     toolRegistry,
     initialActiveTools: toolSupply.initialActiveTools,
     recommendedTools: toolSupply.recommendedTools,

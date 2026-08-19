@@ -121,6 +121,7 @@ describe('workspace snapshot chat session truth', () => {
         summary: '摘要',
         lastSummaryTime: '2026-04-28T01:00:00.000Z',
         contextSummary: '上下文',
+        contextSummaryMessageId: 37,
         isArchived: 1,
         archiveName: '归档名',
         archiveCategory: '日常',
@@ -274,6 +275,7 @@ describe('workspace snapshot chat session truth', () => {
         summary: '摘要',
         last_summary_time: '2026-04-28T01:00:00.000Z',
         context_summary: '上下文',
+        context_summary_message_id: 37,
         is_archived: 1,
         archive_name: '归档名',
         archive_category: '日常',
@@ -445,7 +447,9 @@ describe('workspace snapshot chat session truth', () => {
       }]),
       getAllSessionOrchestrationStates: vi.fn(() => [{
         id: 'state_1', sessionId: 'session_1', worldId: 'world_1', scenarioCode: 'investigation',
-        anchorMessageId: '101', version: 2
+        anchorMessageId: '101', dependencySnapshotJson: {
+          fingerprint: 'fp-state-1', values: { curtain: 'v3' }
+        }, version: 2
       }]),
       getAllMessages: vi.fn(() => []),
       getAllMessageProjections: vi.fn(() => []),
@@ -488,7 +492,10 @@ describe('workspace snapshot chat session truth', () => {
     expect(exported.chatSessionNarrativeOverrides).toMatchObject([{ id: 'override_1', content: '更悬疑', version: 2 }])
     expect(exported.chatSessionDirectorTasks).toBeUndefined()
     expect(exported.chatSessionDirectives).toBeUndefined()
-    expect(exported.chatSessionOrchestrationStates).toMatchObject([{ id: 'state_1', scenarioCode: 'investigation' }])
+    expect(exported.chatSessionOrchestrationStates).toMatchObject([{
+      id: 'state_1', scenarioCode: 'investigation',
+      dependencySnapshotJson: { fingerprint: 'fp-state-1', values: { curtain: 'v3' } }
+    }])
     expect(exported.chatStatusPanels).toMatchObject([{ id: 'status_panel_1', hostType: 'session_character', hostId: 'participant_1', version: 4 }])
     expect(exported.chatStatusPanelEvents).toMatchObject([{ id: 'status_event_1', eventType: 'patched', toVersion: 4 }])
 
@@ -538,7 +545,10 @@ describe('workspace snapshot chat session truth', () => {
       expect.objectContaining({ id: 'override_1', content: '更悬疑', version: 2 })
     ])
     expect(restoreChatRepository.replaceSessionOrchestrationStates).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'state_1', scenarioCode: 'investigation', anchorMessageId: '101' })
+      expect.objectContaining({
+        id: 'state_1', scenarioCode: 'investigation', anchorMessageId: '101',
+        dependencySnapshotJson: { fingerprint: 'fp-state-1', values: { curtain: 'v3' } }
+      })
     ])
     expect(restoreChatRepository.replaceStatusPanels).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'status_panel_1', hostType: 'session_character', hostId: 'participant_1', version: 4 })

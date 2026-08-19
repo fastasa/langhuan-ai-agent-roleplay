@@ -30,6 +30,7 @@ import { buildCharacterBrainRecallCandidateCards } from './characterBrainRecall'
 import { buildCleanRecallPromptBlock } from './characterBrainRecallPromptBlock'
 import { readRecallContentText } from './unitContentPort'
 import type { RecallEmbeddingVectorCache } from './recallEmbeddingCache'
+import { buildEmbeddingCacheScope } from '../utils/modelUsageConfig'
 
 type MessageLike = {
   role?: string
@@ -58,7 +59,7 @@ type EmbeddingCallResult = number[][] | {
 type CallAI = (messages: { role: string; content: string }[]) => Promise<AiCallResult>
 export type CallEmbedding = (input: string[]) => Promise<EmbeddingCallResult>
 type RecallPipelineOptions = {
-  agentConfig?: Pick<AgentModelConfig, 'recallCandidateMode' | 'recallContentStrategy' | 'intentSnapshotMode' | 'enabled' | 'embeddingPresetId'> | null
+  agentConfig?: Pick<AgentModelConfig, 'recallCandidateMode' | 'recallContentStrategy' | 'intentSnapshotMode' | 'enabled' | 'embeddingPresetId' | 'embeddingModel' | 'embeddingDimensions'> | null
   userProfile?: Partial<UserProfile> | null
   otherCharacters?: Array<Pick<Character, 'id' | 'name' | 'nicknames' | 'appearance'>> | null
   currentDate?: Date
@@ -2613,7 +2614,7 @@ export async function runMultiRoundRecallPipeline(
       allCards,
       options.embedTexts,
       options.embeddingVectorCache,
-      options.embeddingCacheScope || options.agentConfig?.embeddingPresetId || 'default'
+      options.embeddingCacheScope || buildEmbeddingCacheScope(options.agentConfig)
     )
     throwIfRecallAborted(options)
     embeddingScores = embeddingResult.scores

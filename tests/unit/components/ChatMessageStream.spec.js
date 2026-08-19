@@ -76,6 +76,20 @@ describe('ChatMessageStream', () => {
   // 顶部标题式召回入口（.recall-activity-inline-entry）已整体移除：历史/流式/重生成态均不再渲染该入口。
   // 召回面板入口已经从消息流中移除。
 
+  it('空工作区显示顶部提调坞和新建角色入口，并接回正式创建事件', async () => {
+    const wrapper = mountStream({ currentTarget: '', currentCharacter: null })
+
+    const dockBar = wrapper.get('.tds-dock__bar')
+    expect(dockBar.exists()).toBe(true)
+    await dockBar.trigger('click')
+    expect(wrapper.get('.tds-dock__empty').text()).toBe('还没有提调记录')
+
+    expect(wrapper.find('.chat-empty-start__text').text()).toBe('请选择一个角色开始聊天')
+    expect(wrapper.get('.chat-empty-start__action').text()).toBe('新建角色')
+    await wrapper.get('.chat-empty-start__action').trigger('click')
+    expect(wrapper.emitted('create-first-character')).toHaveLength(1)
+  })
+
   it('动作输入及其描写显示同组特殊样式，并明确标出私密或公开', () => {
     const wrapper = mountStream({
       currentMessages: [

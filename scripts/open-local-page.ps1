@@ -15,7 +15,7 @@ while ((Get-Date) -lt $deadline) {
       exit 0
     }
   } catch {
-    # 服务仍在启动，继续等待。
+    # The local service is still starting. Keep waiting.
   }
 
   Start-Sleep -Seconds 1

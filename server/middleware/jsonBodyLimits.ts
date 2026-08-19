@@ -21,8 +21,18 @@ const LARGE_JSON_BODY_ROUTES = [
 ]
 
 const MEDIUM_JSON_BODY_ROUTES = [
+  // 星依与其他 Agent 的现役对话会携带完整上下文、工具定义和历史消息，合法请求会超过 256kb。
+  // 只放宽聊天主入口到 15mb，其余 AI 接口仍走 256kb 默认档。
+  /^\/api\/ai\/chat$/,
   /^\/api\/data\/chat-images$/,
   /^\/api\/data\/chat-sessions\/[^/]+\/status-assets$/,
+  // 最终回复提示词可能包含完整角色上下文、提示词库和长对话历史，合法日志会超过 256kb。
+  // 日志只是文本快照，不需要放宽到 50mb 导入档；15mb 足以覆盖模型请求，并继续保持边界。
+  /^\/api\/data\/chat-sessions\/[^/]+\/prompt-logs$/,
+  /^\/api\/data\/chat\/[^/]+\/prompt-logs$/,
+  // Journal 的 payload 自身上限是 256 KiB；envelope 字段与 JSON 转义会让合法事件略超普通 256kb。
+  // 外层只放宽解析到 15mb，application service 仍逐字段并按 payload bytes 执行更严的 256 KiB 门禁。
+  /^\/api\/data\/agent-runtime-journal\/runs\/[^/]+\/events$/,
   // 人格问卷保存是完整快照写入。达到数百题后合法 JSON 会稳定超过普通 256kb；
   // 单独进入 15mb 中档，不扩大所有角色接口，也不误套 50mb 批量导入预算。
   /^\/api\/data\/characters\/[^/]+\/personality-training\/datasets\/[^/]+\/questionnaire$/

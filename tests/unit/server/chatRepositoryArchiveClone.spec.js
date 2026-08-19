@@ -155,6 +155,7 @@ function createArchiveCloneTables(db) {
       target_id TEXT DEFAULT '',
       final_prompt TEXT DEFAULT '',
       prompt_blocks_json TEXT DEFAULT '[]',
+      log_kind TEXT DEFAULT 'final_reply',
       created_at TEXT DEFAULT '',
       user_id TEXT DEFAULT '',
       workspace_id TEXT DEFAULT 'local',
@@ -623,40 +624,40 @@ describe('chatRepository archive clone', () => {
     const repository = createChatRepository(db)
     db.prepare(`
       INSERT INTO chat_messages (
-        id, session_id, role, message_kind, content, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(1, 'session_a', 'assistant', 'chat', '普通回复', '2026-05-11T10:00:00.000Z')
+        id, session_id, role, message_kind, content, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'session_a', 'assistant', 'chat', '普通回复', '2026-05-11T10:00:00.000Z', 'local', 'local')
     db.prepare(`
       INSERT INTO chat_messages (
-        id, session_id, role, message_kind, content, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(2, 'session_a', 'assistant', 'narration_debug', '是', '2026-05-11T10:01:00.000Z')
+        id, session_id, role, message_kind, content, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(2, 'session_a', 'assistant', 'narration_debug', '是', '2026-05-11T10:01:00.000Z', 'local', 'local')
     db.prepare(`
       INSERT INTO chat_prompt_logs (
-        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run('log_orphan', 'session_a', 999, '孤儿提示词', '[{"role":"system","title":"旧","content":"旧"}]', '2026-05-11T10:05:00.000Z')
+        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('log_orphan', 'session_a', 999, '孤儿提示词', '[{"role":"system","title":"旧","content":"旧"}]', '2026-05-11T10:05:00.000Z', 'local', 'local')
     db.prepare(`
       INSERT INTO chat_prompt_logs (
-        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run('log_deleted', 'session_a', 1, '已删除', '[]', '2026-05-11T10:04:00.000Z')
+        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('log_deleted', 'session_a', 1, '已删除', '[]', '2026-05-11T10:04:00.000Z', 'local', 'local')
     db.prepare(`
       INSERT INTO chat_prompt_logs (
-        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run('log_chat', 'session_a', 1, '普通聊天提示词', '[{"role":"system","title":"聊天","content":"普通聊天提示词"}]', '2026-05-11T10:03:00.000Z')
+        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('log_chat', 'session_a', 1, '普通聊天提示词', '[{"role":"system","title":"聊天","content":"普通聊天提示词"}]', '2026-05-11T10:03:00.000Z', 'local', 'local')
     db.prepare(`
       INSERT INTO chat_prompt_logs (
-        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run('log_debug', 'session_a', 2, '旁白快判提示词', '[{"role":"system","title":"快判","content":"旁白快判提示词"}]', '2026-05-11T10:02:00.000Z')
+        id, session_id, assistant_message_id, final_prompt, prompt_blocks_json, created_at, user_id, workspace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('log_debug', 'session_a', 2, '旁白快判提示词', '[{"role":"system","title":"快判","content":"旁白快判提示词"}]', '2026-05-11T10:02:00.000Z', 'local', 'local')
 
     expect(repository.countPromptLogsBySessionId('session_a')).toBe(2)
-    expect(repository.listPromptLogsBySessionId('session_a', 10, 0).map((item) => item.id)).toEqual(['log_chat', 'log_debug'])
+    expect(repository.listPromptLogsBySessionId('session_a', 10, 0).map((item) => item.id)).toEqual(['log_debug', 'log_chat'])
     expect(repository.findLatestPromptLogByMessageId('session_a', 999)).toBeNull()
     expect(repository.findLatestPromptLogByMessageId('session_a', 2).id).toBe('log_debug')
-    expect(repository.getPromptLogPageById('session_a', 'log_debug', 1)).toBe(2)
+    expect(repository.getPromptLogPageById('session_a', 'log_debug', 1)).toBe(1)
   })
 
   it('替换归档消息时清理旧范围数据并保留来源数据归属', async () => {

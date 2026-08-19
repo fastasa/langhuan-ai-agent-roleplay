@@ -54,4 +54,22 @@ describe('Agent conversation model selection', () => {
       thinking: 'enabled'
     })
   })
+
+  it('对话未单独选择 effort 时继承槽位参数', () => {
+    const options = buildAgentConversationModelAiOptions({
+      modelUsageConfigs: [{
+        id: 'smart',
+        label: '掌阁',
+        presetName: 'Codex桥',
+        model: 'gpt-5.6-sol',
+        temperature: 0.4,
+        maxTokens: 4096,
+        thinking: 'enabled',
+        effort: 'xhigh',
+        serviceTier: ''
+      }]
+    }, { slotId: 'smart', effort: '' })
+
+    expect(options.effort).toBe('xhigh')
+  })
 })

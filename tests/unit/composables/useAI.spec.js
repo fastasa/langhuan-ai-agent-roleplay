@@ -547,7 +547,10 @@ describe('useAI', () => {
           recallContentStrategy: 'summary_gate',
           presetName: '召回判断',
           recallModel: 'glm-4.5-air',
-          recallMaxTokens: 512
+          recallMaxTokens: 512,
+          embeddingPresetId: 'EmbedLocal',
+          embeddingModel: 'text-embedding-local',
+          embeddingDimensions: 1024
         }))
       },
       charStore: {
@@ -637,7 +640,10 @@ describe('useAI', () => {
           recallContentStrategy: 'summary_gate',
           presetName: '召回判断',
           recallModel: 'glm-4.5-air',
-          recallMaxTokens: 512
+          recallMaxTokens: 512,
+          embeddingPresetId: 'EmbedLocal',
+          embeddingModel: 'text-embedding-local',
+          embeddingDimensions: 1024
         }))
       },
       charStore: {
@@ -689,6 +695,13 @@ describe('useAI', () => {
     expect(outboundRecallText).toContain('银白短发')
     expect(outboundRecallText).not.toContain('默认用户的外貌')
     expect(outboundRecallText).not.toContain('默认黑发默认外套')
+    const embeddingBody = JSON.parse(String(global.fetch.mock.calls
+      .find(([url]) => String(url).includes('/api/ai/embeddings'))?.[1]?.body || '{}'))
+    expect(embeddingBody).toMatchObject({
+      presetId: 'EmbedLocal',
+      model: 'text-embedding-local',
+      dimensions: 1024
+    })
   })
 
   it('AI 召回会读取当前会话临时实体并把正文装入本轮资料', async () => {
@@ -1310,7 +1323,19 @@ describe('useAI', () => {
       {
         presetName: '小忆',
         tools: [{ type: 'function', function: { name: 'readScenarioSkill', description: '读情境', parameters: { type: 'object' } } }],
-        toolChoice: 'auto'
+        toolChoice: 'auto',
+        profileId: 'tidiao.director-round',
+        harnessRunId: 'director_run_1',
+        modelTurnIndex: 2,
+        toolEpoch: 1,
+        toolEpochTurnIndex: 0,
+        promptRebuild: true,
+        activeToolNamesHash: 'fnv1a32:11111111',
+        toolSchemaHash: 'fnv1a32:22222222',
+        systemHash: 'fnv1a32:33333333',
+        messagePrefixHash: 'fnv1a32:44444444',
+        requestEnvelopeHash: 'fnv1a32:55555555',
+        firstDiffSource: 'tools'
       }
     )
 
@@ -1320,6 +1345,20 @@ describe('useAI', () => {
     // 客户端→代理 body 用驼峰 toolChoice；转上游时由服务端改写为 tool_choice（见服务端测试）。
     expect(capturedBody.toolChoice).toBe('auto')
     expect(capturedBody.stream).toBe(false)
+    expect(capturedBody.meta).toMatchObject({
+      profileId: 'tidiao.director-round',
+      harnessRunId: 'director_run_1',
+      modelTurnIndex: 2,
+      toolEpoch: 1,
+      toolEpochTurnIndex: 0,
+      promptRebuild: true,
+      activeToolNamesHash: 'fnv1a32:11111111',
+      toolSchemaHash: 'fnv1a32:22222222',
+      systemHash: 'fnv1a32:33333333',
+      messagePrefixHash: 'fnv1a32:44444444',
+      requestEnvelopeHash: 'fnv1a32:55555555',
+      firstDiffSource: 'tools'
+    })
     // 回包：原生 tool_calls 取回，content 同时带出
     expect(result.toolCalls).toHaveLength(1)
     expect(result.toolCalls[0].function.name).toBe('readScenarioSkill')

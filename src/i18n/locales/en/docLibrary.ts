@@ -83,7 +83,8 @@ export const docLibrary = {
     editSuffix: 'Edit'
   },
   topbar: {
-    promptTitle: 'Prompts',
+    rolePromptTitle: 'Role Prompts',
+    scenarioPromptTitle: 'Scenario Prompts',
     pageSearch: 'Search pages',
     deletePage: 'Delete page',
     deletePrompt: 'Delete prompt',

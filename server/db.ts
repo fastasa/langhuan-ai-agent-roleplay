@@ -91,6 +91,7 @@ export const DATA_SCOPED_TABLES = [
   'chat_session_orchestration_state',
   'chat_orchestration_command_operations',
   'chat_post_round_orchestration_runs',
+  'agent_runtime_journal_events',
   'chat_session_temporary_characters',
   'chat_session_temporary_entities',
   'chat_status_panel_templates',
@@ -1075,6 +1076,7 @@ function createTables() {
     summary TEXT DEFAULT '',
     last_summary_time TEXT DEFAULT '',
     context_summary TEXT DEFAULT '',
+    context_summary_message_id INTEGER DEFAULT 0,
     caps_residue_state_json TEXT DEFAULT '{}',
     is_archived INTEGER DEFAULT 0,
     archive_name TEXT DEFAULT '',
@@ -1602,6 +1604,7 @@ function createTables() {
   CREATE TABLE IF NOT EXISTS chat_session_orchestration_state (
     id TEXT NOT NULL, session_id TEXT NOT NULL, world_id TEXT DEFAULT '', scenario_code TEXT NOT NULL DEFAULT '',
     scenario_label TEXT DEFAULT '', scenario_summary TEXT DEFAULT '', anchor_message_id TEXT DEFAULT '', source_artifact_id TEXT DEFAULT '',
+    dependency_snapshot_json TEXT DEFAULT '{}',
     version INTEGER NOT NULL DEFAULT 1, source TEXT NOT NULL DEFAULT 'director_artifact',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
     user_id TEXT DEFAULT '', workspace_id TEXT DEFAULT 'local',
@@ -1875,6 +1878,8 @@ function createTables() {
     temperature REAL DEFAULT 0.7,
     is_default INTEGER DEFAULT 0,
     fallback_preset TEXT DEFAULT '',
+    max_concurrency INTEGER DEFAULT 6,
+    min_interval INTEGER DEFAULT 0,
     -- 识图标记（输入框图片上传计划批2）：手工勾选，供 aiAppService 图片双通道分流判断。
     supports_vision INTEGER DEFAULT 0,
     user_id TEXT DEFAULT '',
@@ -2104,6 +2109,25 @@ function createTables() {
   );
   CREATE INDEX IF NOT EXISTS idx_chat_post_round_runs_session_status
     ON chat_post_round_orchestration_runs(user_id, workspace_id, session_id, status, created_at);
+
+  -- 通用 Agent runtime 追加式事件账本。旧库启动时由 IF NOT EXISTS 原地增量创建；
+  -- (user, workspace, run, seq) 是不可覆盖的事件身份，checksum 冲突由 application service 拒绝。
+  CREATE TABLE IF NOT EXISTS agent_runtime_journal_events (
+    run_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    schema_version INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    completion_anchor TEXT NOT NULL DEFAULT '',
+    checksum TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    user_id TEXT DEFAULT '',
+    workspace_id TEXT DEFAULT 'local',
+    UNIQUE(user_id, workspace_id, run_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_runtime_journal_scope_run_seq
+    ON agent_runtime_journal_events(user_id, workspace_id, run_id, seq);
 
 
   -- 本地文件登记表；只记录本机静态资源，不包含账号、审核或远程管理信息。
@@ -2336,6 +2360,11 @@ function ensureDataScopeColumns() {
 
 function ensureApiPresetColumns() {
   ensureColumn('api_presets', 'provider_type', "TEXT DEFAULT 'openai-compatible'")
+  // 纯净版不携带完整版的历史 migrations 目录，因此这里既负责新库建表后的兜底，
+  // 也负责为已经创建过的本地空库补齐预设保存与运行时节流所需列。
+  ensureColumn('api_presets', 'max_concurrency', 'INTEGER DEFAULT 6')
+  ensureColumn('api_presets', 'min_interval', 'INTEGER DEFAULT 0')
+  ensureColumn('api_presets', 'supports_vision', 'INTEGER DEFAULT 0')
   db.prepare(`
     UPDATE api_presets
     SET provider_type = CASE
@@ -2586,6 +2615,9 @@ function migrateApiPresetsScopedIdentity() {
       temperature REAL DEFAULT 0.7,
       is_default INTEGER DEFAULT 0,
       fallback_preset TEXT DEFAULT '',
+      max_concurrency INTEGER DEFAULT 6,
+      min_interval INTEGER DEFAULT 0,
+      supports_vision INTEGER DEFAULT 0,
       user_id TEXT DEFAULT '',
       workspace_id TEXT DEFAULT 'local',
       UNIQUE(user_id, workspace_id, name)
@@ -2593,7 +2625,8 @@ function migrateApiPresetsScopedIdentity() {
 
     INSERT OR IGNORE INTO api_presets_scoped_migration (
       name, provider_type, base_url, api_key, model, available_models,
-      max_tokens, temperature, is_default, fallback_preset, user_id, workspace_id
+      max_tokens, temperature, is_default, fallback_preset,
+      max_concurrency, min_interval, supports_vision, user_id, workspace_id
     )
     SELECT
       name,
@@ -2606,6 +2639,9 @@ function migrateApiPresetsScopedIdentity() {
       COALESCE(temperature, 0.7),
       COALESCE(is_default, 0),
       COALESCE(fallback_preset, ''),
+      COALESCE(max_concurrency, 6),
+      COALESCE(min_interval, 0),
+      COALESCE(supports_vision, 0),
       COALESCE(user_id, ''),
       COALESCE(workspace_id, 'local')
     FROM api_presets;
@@ -2682,6 +2718,20 @@ ensureColumn('chat_affect_ledger_entries', 'stale_trigger_message_id', 'INTEGER 
 ensureColumn('chat_affect_gate_audits', 'stale_at', "TEXT DEFAULT ''")
 ensureColumn('chat_affect_gate_audits', 'stale_reason', "TEXT DEFAULT ''")
 ensureColumn('chat_affect_gate_audits', 'stale_trigger_message_id', 'INTEGER DEFAULT 0')
+// 请求信封诊断：CREATE TABLE 只覆盖新库；旧库逐列补齐，避免升级后 ledger insert 因缺列整条失败。
+ensureColumn('ai_usage_ledger', 'profile_id', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'provider_kind', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'harness_run_id', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'model_turn_index', 'INTEGER DEFAULT 0')
+ensureColumn('ai_usage_ledger', 'tool_epoch', 'INTEGER DEFAULT 0')
+ensureColumn('ai_usage_ledger', 'tool_epoch_turn_index', 'INTEGER DEFAULT 0')
+ensureColumn('ai_usage_ledger', 'prompt_rebuild', 'INTEGER DEFAULT 0')
+ensureColumn('ai_usage_ledger', 'active_tool_names_hash', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'tool_schema_hash', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'system_hash', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'message_prefix_hash', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'request_envelope_hash', "TEXT DEFAULT ''")
+ensureColumn('ai_usage_ledger', 'first_diff_source', "TEXT DEFAULT ''")
 // 状态系统多维表格化批次B（2026-07-10）：实例字段快照列（additive·空串=旧实例回退模板字段）
 ensureColumn('chat_status_panels', 'fields_json', "TEXT DEFAULT ''")
 ensureColumn('chat_status_panel_templates', 'presentation_json', "TEXT DEFAULT ''")
@@ -2753,7 +2803,7 @@ db.prepare(`
   UPDATE chat_prompt_logs
   SET log_kind = 'message_projection'
   WHERE speaker_name = '消息投影 Agent'
-    AND COALESCE(log_kind, '') != 'message_projection'
+    AND COALESCE(log_kind, '') NOT IN ('message_projection', 'manual_projection', 'internal_agent')
 `).run()
 ensureColumn('chat_recall_activity_logs', 'assistant_message_id', 'INTEGER DEFAULT 0')
 ensureColumn('chat_recall_activity_logs', 'input_message_id', 'INTEGER DEFAULT 0')
@@ -2830,10 +2880,12 @@ ensureColumn('chat_sessions', 'created_at', "TEXT DEFAULT ''")
 ensureColumn('chat_sessions', 'summary', "TEXT DEFAULT ''")
 ensureColumn('chat_sessions', 'last_summary_time', "TEXT DEFAULT ''")
 ensureColumn('chat_sessions', 'context_summary', "TEXT DEFAULT ''")
+ensureColumn('chat_sessions', 'context_summary_message_id', 'INTEGER DEFAULT 0')
 ensureColumn('chat_sessions', 'caps_residue_state_json', "TEXT DEFAULT '{}'")
 ensureColumn('chat_sessions', 'title', "TEXT DEFAULT ''")
 ensureColumn('chat_sessions', 'conversation_avatar_path', "TEXT DEFAULT ''")
 ensureColumn('chat_sessions', 'conversation_emoji', "TEXT DEFAULT ''")
+ensureColumn('chat_session_orchestration_state', 'dependency_snapshot_json', "TEXT DEFAULT '{}'")
 // 会话种类：roleplay=角色扮演会话（默认）；xingyi=星依总agent会话（不进联系人侧栏、不参与角色召回/训练取样）
 ensureColumn('chat_sessions', 'kind', "TEXT DEFAULT 'roleplay'")
 // 会话所属世界（地图系统批2）：空串=未挂世界；挂接只走 POST /chat-sessions/:id/world 专用端点（含世界存在校验）

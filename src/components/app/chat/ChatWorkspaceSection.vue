@@ -70,6 +70,7 @@
       @open-prompt-log-panel="$emit('open-prompt-log-panel', $event)"
       @open-personality-orchestration-audit="$emit('open-personality-orchestration-audit', $event)"
       @open-recall-activity-panel="handleOpenThinkingPanel"
+      @create-first-character="props.actions.openAddCharacter(undefined, { collapseSidebar: false })"
       @open-fullscreen-image="props.actions.openFullscreenImage"
       @update:editing-message-content="props.actions.updateEditingMessageContent"
       @cancel-edit-message="props.actions.cancelEditMessage"
@@ -92,13 +93,15 @@
 
     <!-- 输入栏上方常驻「提调纠偏」浮条（单聊 + 群聊·D6 起；走完保留、决策流不消失）。智能二选一（用户 2026-06-20）：
          带楼层号「角色3-5、旁白2 改委婉点」→ 按楼层精修；不带楼层号 → 对上一轮导演决策流纠偏续跑。
-         显隐判据用 currentTarget（单聊=角色 target、群聊=group_ target，均 truthy）而非 activeSessionId——
-         单聊无 session 实体、activeSessionId 恒为空串，旧判据会把单聊纠偏栏永久挡掉（2026-06-20 真机 bug 根因）。
+         公开空库仍保留浮条轮廓：无 currentTarget 时禁用并提示先新建或选择角色，但默认只露细边；
+         与正式交互一致，鼠标悬浮或点击聚焦后才抬起。
+         可用判据用 currentTarget（单聊=角色 target、群聊=group_ target，均 truthy）而非 activeSessionId——
+         单聊无 session 实体、activeSessionId 恒为空串，若把可用性绑到 session 会把单聊纠偏栏永久挡掉。
          D6：去掉旧 groupMembers.length<=1 单聊 gate——共享层精修/纠偏 loop 会话类型无关（按楼层/messageId 工作、
          移动端本就群聊可用），群聊也展示；群聊一轮多发言者，placeholder 特化提示按楼层精修指定角色。 -->
     <TidiaoPrecisionEditBar
-      v-if="props.viewModel.currentTarget && props.actions.applyDirectorPrecisionEdits"
-      :disabled="Boolean(props.viewModel.isTyping || props.viewModel.hasForegroundChatTask)"
+      v-if="props.actions.applyDirectorPrecisionEdits"
+      :disabled="Boolean(!props.viewModel.currentTarget || props.viewModel.isTyping || props.viewModel.hasForegroundChatTask)"
       :placeholder="precisionEditPlaceholder"
       @submit="handlePrecisionEdit"
     />
@@ -150,6 +153,7 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ComponentPublicInstance } from 'vue'
 import type { ChatMessageNoteCreatePayload, ChatPanelActions, ChatPanelViewModel, EnvironmentViewModel } from '../../../types/panelContracts'
 import type { UseStickToBottomResult } from '../../../composables/useStickToBottom'
@@ -160,6 +164,7 @@ const ChatMessageStream = defineAsyncComponent(() => import('./ChatMessageStream
 const ChatInputBar = defineAsyncComponent(() => import('./ChatInputBar.vue'))
 const ChatProcessMotion = defineAsyncComponent(() => import('../../common/ChatProcessMotion.vue'))
 const TidiaoPrecisionEditBar = defineAsyncComponent(() => import('./TidiaoPrecisionEditBar.vue'))
+const { t } = useI18n()
 
 type RefTarget = Element | ComponentPublicInstance | null
 type GroupMemberChip = {
@@ -250,7 +255,9 @@ function handleRegenerateMessage(payload: number | { index?: number; mode?: 'rec
 // D6 群聊上下文特化：群聊一轮多发言者，浮条提示按楼层精修指定角色（改皮后单聊默认文案丢了楼层提示，
 // 群聊更需要它）；单聊保持改皮后的简洁文案。群聊判据复用 groupMembers（与旧 gate 同口径，>1=群聊）。
 const precisionEditPlaceholder = computed(() =>
-  props.groupMembers.length > 1
+  !props.viewModel.currentTarget
+    ? t('chat.selectCharacterFirst')
+    : props.groupMembers.length > 1
     ? '提调修改群聊：带「角色2」按楼层精修指定角色，或直接说改方向纠偏'
     : '输入消息，让提调修改聊天'
 )

@@ -25,7 +25,19 @@ describe('aiRepository', () => {
       maxTokens: 512,
       stream: true,
       meta: {
-        logLabel: '测试日志'
+        logLabel: '测试日志',
+        profileId: 'tidiao.director-round',
+        harnessRunId: 'director_run_1',
+        modelTurnIndex: 2,
+        toolEpoch: 1,
+        toolEpochTurnIndex: 0,
+        promptRebuild: true,
+        activeToolNamesHash: 'fnv1a32:11111111',
+        toolSchemaHash: 'fnv1a32:22222222',
+        systemHash: 'fnv1a32:33333333',
+        messagePrefixHash: 'fnv1a32:44444444',
+        requestEnvelopeHash: 'fnv1a32:55555555',
+        firstDiffSource: 'tools'
       }
     })
 
@@ -36,7 +48,21 @@ describe('aiRepository', () => {
       method: 'POST'
     }))
     expect(JSON.parse(String(fetch.mock.calls[0][1].body))).toEqual(expect.objectContaining({
-      maxTokens: 512
+      maxTokens: 512,
+      meta: expect.objectContaining({
+        profileId: 'tidiao.director-round',
+        harnessRunId: 'director_run_1',
+        modelTurnIndex: 2,
+        toolEpoch: 1,
+        toolEpochTurnIndex: 0,
+        promptRebuild: true,
+        activeToolNamesHash: 'fnv1a32:11111111',
+        toolSchemaHash: 'fnv1a32:22222222',
+        systemHash: 'fnv1a32:33333333',
+        messagePrefixHash: 'fnv1a32:44444444',
+        requestEnvelopeHash: 'fnv1a32:55555555',
+        firstDiffSource: 'tools'
+      })
     }))
   })
 

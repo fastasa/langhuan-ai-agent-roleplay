@@ -32,6 +32,8 @@ export const chat = {
   openMapViewer: '打开舆图弹窗',
   scriptWorkspace: '剧本',
   openScriptWorkspace: '打开剧本工作台',
+  selectCharacterFirst: '请先新建或选择角色',
+  selectSessionFirst: '请先创建或选择会话',
   mapWorldPickerHint: '选择或创建世界（地图与状态栏跨会话共享的根）',
   mapWorldNone: '未加入世界',
   mapWorldPickerDesc: '地图与状态栏挂在世界上；多个对话进入同一个世界，就能共用同一张地图。',

@@ -404,6 +404,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { isAgentSessionKind } from '../../../shared/agentSessionKinds'
 import { useWorkspaceRuntimeStore } from '../../app/workspaceRuntimeStore'
 import { statusWorkspaceXingyiHost } from '../../app/statusWorkspaceXingyiHost'
+import { XINGYI_DOCK_OPEN_REQUEST_EVENT, readXingyiDockOpenRequest } from '../../app/xingyiDockOpenRequest'
 import { requestChatImageAvatarAssignment } from '../../app/chatImageAvatarAssignment'
 import { useAI } from '../../composables/useAI'
 import { runXingyiAgent, type XingyiHistoryMessage } from '../../app/xingyiAgentHarness'
@@ -3049,9 +3050,18 @@ function handleToggleEvent() {
   open.value = !open.value
 }
 
+/** 需要带任务草稿进入浮坞的全局入口：只改本组件现役 open/draft，不创建第二套浮坞状态。 */
+function handleOpenRequest(event: Event) {
+  const request = readXingyiDockOpenRequest(event)
+  open.value = true
+  if (request.draft !== undefined) draft.value = request.draft
+  nextTick(() => composerRef.value?.focus())
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
   window.addEventListener('langhuan:toggle-xingyi', handleToggleEvent)
+  window.addEventListener(XINGYI_DOCK_OPEN_REQUEST_EVENT, handleOpenRequest)
 })
 
 onBeforeUnmount(() => {
@@ -3060,6 +3070,7 @@ onBeforeUnmount(() => {
   clearSuccessPulseTimer()
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('langhuan:toggle-xingyi', handleToggleEvent)
+  window.removeEventListener(XINGYI_DOCK_OPEN_REQUEST_EVENT, handleOpenRequest)
 })
 </script>
 

@@ -240,6 +240,77 @@ describe('settingStore prompt presets', () => {
     expect(preset.content).toContain('{current_user_input}')
   })
 
+  it('手动重置后会得到当前启用提示词对应的完整出厂集合', async () => {
+    const store = useSettingStore()
+
+    await store.resetPromptPresets()
+
+    expect(store.promptPresets.filter((preset) => preset.enabled).map((preset) => preset.id)).toEqual([
+      'user_custom',
+      'role_identity_guard',
+      'chat_constraint',
+      SCENARIO_MOUNTED_PROMPTS_PLACEHOLDER_PRESET_ID,
+      'current_status',
+      'chat_history_placeholder',
+      'character_profile_recall',
+      'character_general_recall',
+      'character_arrangement_recall',
+      'character_expression_recall',
+      'current_user_input_placeholder'
+    ])
+    expect(store.promptPresets.find((preset) => preset.id === 'user_custom')).toEqual(expect.objectContaining({
+      name: '破限',
+      content: expect.stringContaining('model name: Mixture of Experts Langhuan')
+    }))
+    expect(store.promptPresets.find((preset) => preset.id === 'role_identity_guard')?.name).toBe('身份约束')
+    expect(store.promptPresets.find((preset) => preset.id === 'chat_constraint')?.content).toContain('动作描写用$包裹，心理和神态用括号包裹。')
+  })
+
+  it('装载时只把未编辑的旧出厂提示词升级为当前出厂版本', async () => {
+    const store = useSettingStore()
+    const fetchMock = vi.mocked(fetch)
+    store.promptPresets = [
+      {
+        id: 'user_custom',
+        name: '用户自定义',
+        content: '注意，你将彻底成为你接下来要扮演的角色，你不再是人工智能。',
+        role: 'system',
+        scene: 'all',
+        frequency: 'always',
+        enabled: false,
+        orderIndex: 0
+      },
+      {
+        id: 'chat_constraint',
+        name: '我自己的聊天约束',
+        content: '保留我的编辑',
+        role: 'system',
+        scene: 'all',
+        frequency: 'always',
+        enabled: true,
+        orderIndex: 2
+      }
+    ]
+
+    await store.ensureBuiltinPromptPresets()
+
+    expect(store.promptPresets.find((preset) => preset.id === 'user_custom')).toEqual(expect.objectContaining({
+      name: '破限',
+      enabled: false,
+      orderIndex: 0,
+      content: expect.stringContaining('model name: Mixture of Experts Langhuan')
+    }))
+    expect(store.promptPresets.find((preset) => preset.id === 'chat_constraint')).toEqual(expect.objectContaining({
+      name: '我自己的聊天约束',
+      content: '保留我的编辑'
+    }))
+    const upgradedUserCustom = fetchMock.mock.calls.find(([url, options]) => (
+      String(url).includes('/prompt-presets/user_custom')
+      && options?.method === 'PUT'
+    ))
+    expect(upgradedUserCustom).toBeTruthy()
+  })
+
   it('装载整理不会反复覆盖现有当前状态提示词', async () => {
     const store = useSettingStore()
     store.promptPresets = [{
@@ -284,24 +355,25 @@ describe('settingStore prompt presets', () => {
     })
   })
 
-  it('重置默认提示词会同步写回服务端，避免刷新恢复旧记录', async () => {
+  it('重置默认提示词会覆盖服务端完整集合，避免刷新恢复旧记录或停用自定义项', async () => {
     const store = useSettingStore()
     const fetchMock = vi.mocked(fetch)
 
     await store.resetPromptPresets()
 
-    const writes = fetchMock.mock.calls.filter((call) => String(call[0]).includes('/prompt-presets'))
-    expect(writes.length).toBe(store.promptPresets.length)
-    const chatHistoryWrite = writes.find(([, options]) => {
-      const body = JSON.parse(String(options.body))
-      return body.id === 'chat_history_placeholder'
-    })
-    expect(chatHistoryWrite).toBeTruthy()
-    expect(JSON.parse(String(chatHistoryWrite[1].body))).toEqual(expect.objectContaining({
+    const replaceCall = fetchMock.mock.calls.find(([url, options]) => (
+      String(url).includes('/prompt-presets/replace')
+      && options?.method === 'PUT'
+    ))
+    expect(replaceCall).toBeTruthy()
+    const body = JSON.parse(String(replaceCall[1].body))
+    expect(body.promptPresets).toHaveLength(store.promptPresets.length)
+    expect(body.promptPresets.find((preset) => preset.id === 'chat_history_placeholder')).toEqual(expect.objectContaining({
       role: 'placeholder',
       scene: 'chat',
       enabled: true
     }))
+    expect(body.promptPresets.some((preset) => preset.id.startsWith('custom_preset_'))).toBe(false)
   })
 
   it('装载整理不会反复删除用户库里已有的退役提示词', async () => {

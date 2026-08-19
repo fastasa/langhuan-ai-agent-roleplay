@@ -90,8 +90,9 @@
            提示词日志仍可从消息级「查看提示词日志」进入，移动端工具行入口不受影响。 -->
       <!-- 舆图：单击仍进入完整工作区；悬浮只读当前会话的同一份地图真值，并保留视角缩放/拖动。 -->
       <div
-        v-if="activeSessionId"
         class="chat-map-preview-anchor"
+        :class="{ 'chat-map-preview-anchor--disabled': !hasActiveSession }"
+        :title="mapViewerTitle"
         @pointerenter="openMapPreview"
         @pointerleave="scheduleMapPreviewClose"
         @focusin="openMapPreview"
@@ -100,9 +101,11 @@
       >
         <button
           class="btn btn-small icon-btn chat-action-link"
+          :disabled="!hasActiveSession"
           @click="$emit('open-map-viewer')"
-          :aria-label="t('chat.openMapViewer')"
-          :aria-expanded="mapPreviewOpen"
+          :title="mapViewerTitle"
+          :aria-label="mapViewerTitle"
+          :aria-expanded="hasActiveSession && mapPreviewOpen"
         >
           <span class="chat-action-link-icon" aria-hidden="true">
             <svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -115,7 +118,7 @@
           <span class="chat-action-link-title">{{ t('chat.mapViewer') }}</span>
         </button>
         <div
-          v-if="mapPreviewMounted"
+          v-if="mapPreviewMounted && hasActiveSession"
           v-show="mapPreviewOpen"
           class="chat-map-preview-popover"
           @pointerenter="openMapPreview"
@@ -126,11 +129,11 @@
       </div>
       <!-- 剧本工作台：与舆图同级的对话级入口；右侧是现役剧本试验投影，左侧承接同一星依浮坞。 -->
       <button
-        v-if="activeSessionId"
         class="btn btn-small icon-btn chat-action-link"
+        :disabled="!hasActiveSession"
         @click="$emit('open-script-workspace')"
-        :title="t('chat.openScriptWorkspace')"
-        :aria-label="t('chat.openScriptWorkspace')"
+        :title="scriptWorkspaceTitle"
+        :aria-label="scriptWorkspaceTitle"
       >
         <span class="chat-action-link-icon" aria-hidden="true">
           <svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -141,13 +144,13 @@
         </span>
         <span class="chat-action-link-title">{{ t('chat.scriptWorkspace') }}</span>
       </button>
-      <!-- 状态系统（对话级）：计划书 2026-07-08_状态系统积木骨架计划 批次2 入口；无 sessionId（会话未落库）时不显示。 -->
+      <!-- 状态系统（对话级）：无 sessionId 时保留入口但禁用，避免空库首开被误判为功能缺失。 -->
       <button
-        v-if="activeSessionId"
         class="btn btn-small icon-btn chat-action-link"
+        :disabled="!hasActiveSession"
         @click="$emit('open-status-system-panel')"
-        :title="t('chat.statusSystem')"
-        :aria-label="t('chat.openStatusSystemPanel')"
+        :title="statusSystemTitle"
+        :aria-label="statusSystemTitle"
       >
         <span class="chat-action-link-icon" aria-hidden="true">
           <svg class="line-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -175,8 +178,8 @@
         <span class="chat-action-link-title">{{ t('chat.notes') }}</span>
       </button>
       <button
-        v-if="canOpenSessionSettings"
         class="btn btn-small icon-btn chat-action-link"
+        :disabled="!canOpenSessionSettings"
         @click="openSessionSettings"
         :title="sessionSettingsTitle"
         :aria-label="sessionSettingsTitle"
@@ -189,14 +192,14 @@
             <circle cx="7" cy="7" r="3"></circle>
           </svg>
         </span>
-        <span class="chat-action-link-title">{{ sessionSettingsTitle }}</span>
+        <span class="chat-action-link-title">{{ t('common.settings') }}</span>
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChatPanelViewModel, EnvironmentViewModel, PlannedGroupSpeakerViewModel } from '../../../types/panelContracts'
 import { useWorkspaceRuntimeStore } from '../../../app/workspaceRuntimeStore'
@@ -310,6 +313,10 @@ const projectionLampTitle = computed(() => (
 const mapPreviewOpen = ref(false)
 const mapPreviewMounted = ref(false)
 let mapPreviewCloseTimer: ReturnType<typeof setTimeout> | null = null
+const hasActiveSession = computed(() => Boolean(String(props.activeSessionId || '').trim()))
+const mapViewerTitle = computed(() => hasActiveSession.value ? t('chat.openMapViewer') : t('chat.selectSessionFirst'))
+const scriptWorkspaceTitle = computed(() => hasActiveSession.value ? t('chat.openScriptWorkspace') : t('chat.selectSessionFirst'))
+const statusSystemTitle = computed(() => hasActiveSession.value ? t('chat.openStatusSystemPanel') : t('chat.selectSessionFirst'))
 
 function cancelMapPreviewClose() {
   if (!mapPreviewCloseTimer) return
@@ -318,6 +325,7 @@ function cancelMapPreviewClose() {
 }
 
 function openMapPreview() {
+  if (!hasActiveSession.value) return
   cancelMapPreviewClose()
   mapPreviewMounted.value = true
   mapPreviewOpen.value = true
@@ -337,6 +345,12 @@ function closeMapPreview() {
 }
 
 onBeforeUnmount(cancelMapPreviewClose)
+watch(hasActiveSession, (available) => {
+  if (available) return
+  cancelMapPreviewClose()
+  mapPreviewOpen.value = false
+  mapPreviewMounted.value = false
+})
 
 const plannedSpeakerIdSet = computed(() => new Set((props.plannedSpeakers || []).map((speaker) => String(speaker?.id || '').trim()).filter(Boolean)))
 const plannedSpeakerNameSet = computed(() => new Set((props.plannedSpeakers || []).map((speaker) => String(speaker?.name || '').trim()).filter(Boolean)))
@@ -379,7 +393,7 @@ const resolvedConversationEmoji = computed(() => {
 })
 const canOpenSessionSettings = computed(() => Boolean(props.chatTarget) && (isGroupTarget.value || isCrowdTarget.value || Boolean(props.currentCharacter)))
 const sessionSettingsTitle = computed(() => {
-  return t('common.settings')
+  return canOpenSessionSettings.value ? t('common.settings') : t('chat.selectCharacterFirst')
 })
 
 function isMemberActive(member: GroupMemberChip) {
@@ -686,6 +700,11 @@ function normalizeAvatarUrl(path?: string | null) {
 .chat-main-actions .chat-action-link:focus-visible {
   color: color-mix(in srgb, var(--morandi-accent) 74%, var(--morandi-text));
   outline: 0;
+}
+
+.chat-main-actions .chat-action-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .chat-main-actions .chat-action-link:hover::before,

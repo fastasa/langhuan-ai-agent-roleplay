@@ -124,15 +124,16 @@ export function createWorkspaceSnapshotMigrationRepository(database: MigrationDb
       database.prepare(`
         /* unscoped */ INSERT OR REPLACE INTO chat_sessions (
           id, target_id, target_type, title,
-          summary, last_summary_time, loaded_summary_ids, context_summary, caps_residue_state_json,
+          summary, last_summary_time, loaded_summary_ids, context_summary, context_summary_message_id, caps_residue_state_json,
           updated_at, virtual_scene_name, virtual_scene_desc, virtual_location_large, virtual_location_middle, virtual_location_small, virtual_location, virtual_real_location, virtual_time,
           virtual_time_anchor, virtual_time_base, virtual_time_rate, virtual_weather, virtual_weather_mode,
           bound_alias, narration_frequency, narration_temperature, reply_pipeline_mode, temp_model, temp_preset, user_id, workspace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         row.id, row.targetId, row.targetType,
         row.title ?? '',
-        row.summary, row.lastSummaryTime, row.loadedSummaryIds, row.contextSummary, '{}',
+        row.summary, row.lastSummaryTime, row.loadedSummaryIds, row.contextSummary,
+        Math.max(0, Math.trunc(Number(row.contextSummaryMessageId || 0))), '{}',
         row.updatedAt, row.virtualSceneName, row.virtualSceneDesc,
         locationParts.large,
         locationParts.middle,

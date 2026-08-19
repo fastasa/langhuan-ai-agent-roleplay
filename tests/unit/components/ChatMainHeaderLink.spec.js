@@ -38,21 +38,38 @@ describe('ChatMainHeader link animation actions', () => {
   })
 
   // 2026-07-08：提示词日志/召回面板/人格模型观察三个头部入口已撤下（提示词日志仍走消息级入口）；
-  // 同日批次2：新增对话级「状态」入口（状态系统面板），仅在有 sessionId 时显示。
-  // 2026-07-10 地图系统批1：新增「舆图」入口，位置固定在状态左边，同样仅在有 sessionId 时显示。
-  it('无 sessionId 时头部只保留笔记与设置入口（舆图/剧本/状态按钮不出现）', () => {
+  // 纯净版空库首开仍展示完整前台轮廓；依赖会话的工具保留入口但禁用，避免被误判为功能删除。
+  it('无 sessionId 时仍显示舆图、剧本和状态入口，并明确保持禁用', () => {
     const wrapper = mountHeader()
 
     expect(wrapper.findAll('.chat-action-link-title').map((item) => item.text())).toEqual([
+      '舆图',
+      '剧本',
+      '状态',
       '笔记',
       '设置'
     ])
-    expect(wrapper.find('button[aria-label="打开舆图弹窗"]').exists()).toBe(false)
-    expect(wrapper.find('button[aria-label="打开剧本工作台"]').exists()).toBe(false)
-    expect(wrapper.find('button[aria-label="打开状态系统面板"]').exists()).toBe(false)
+    const buttons = wrapper.findAll('button.chat-action-link')
+    expect(buttons.slice(0, 3).every((button) => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(buttons[3].attributes('disabled')).toBeUndefined()
+    expect(buttons[4].attributes('disabled')).toBeUndefined()
+    expect(buttons.slice(0, 3).every((button) => button.attributes('title') === '请先创建或选择会话')).toBe(true)
     expect(wrapper.find('button[aria-label="打开提示词日志"]').exists()).toBe(false)
     expect(wrapper.find('button[aria-label="打开召回面板"]').exists()).toBe(false)
     expect(wrapper.find('button[aria-label="打开人格模型观察"]').exists()).toBe(false)
+  })
+
+  it('完全空工作区时会话设置也保留入口但禁用', () => {
+    const wrapper = mountHeader({ chatTarget: '' })
+    const buttons = wrapper.findAll('button.chat-action-link')
+
+    expect(wrapper.findAll('.chat-action-link-title').map((item) => item.text())).toEqual([
+      '舆图', '剧本', '状态', '笔记', '设置'
+    ])
+    expect(buttons.slice(0, 3).every((button) => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(buttons[3].attributes('disabled')).toBeUndefined()
+    expect(buttons[4].attributes('disabled')).not.toBeUndefined()
+    expect(buttons[4].attributes('title')).toBe('请先新建或选择角色')
   })
 
   it('有 sessionId 时头部为舆图+剧本+状态+笔记+设置', () => {
@@ -71,6 +88,9 @@ describe('ChatMainHeader link animation actions', () => {
     const wrapper = mountHeader()
 
     expect(wrapper.findAll('.chat-action-link-title').map((item) => item.text())).toEqual([
+      '舆图',
+      '剧本',
+      '状态',
       '笔记',
       '设置'
     ])

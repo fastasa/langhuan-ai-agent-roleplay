@@ -52,10 +52,18 @@ import {
   createNarrativeSeed,
   recordNarrativeSeedImpact
 } from '../../repositories/chatRepository'
-import type { OrchestrationCommandEnvelope } from '../../../shared/orchestrationWorkspace'
+import type {
+  DirectorOrchestrationProjection,
+  OrchestrationCommandEnvelope,
+  OrchestrationWorkspaceProjection
+} from '../../../shared/orchestrationWorkspace'
 import type { AgentContextBundle } from '../../../shared/agentContextProjection'
 import { buildPresenceFactOperations, shouldCommitNarrativeFact } from '../../app/orchestrationFactReconciliation'
-import { planFastReplySpeakers, buildFastReplyPlanningHint } from '../../app/fastReplyPlanner'
+import {
+  buildFastReplyPersonalityPlanCandidates,
+  buildFastReplyPlanningHint,
+  planFastReplySpeakers
+} from '../../app/fastReplyPlanner'
 import {
   buildFocusedActionJudgeMessages,
   buildFocusedActionFinalMessages,
@@ -90,9 +98,26 @@ import {
 import { buildSessionTemporaryCharacterNarrationPrompt, extractSessionTemporaryCharacterField } from '../../app/sessionTemporaryCharacterCommand'
 import { getCurrentRecallActivitySnapshot, markCurrentRecallActivityPersisted, type PersistedRecallActivityRun } from '../../app/recallTraceState'
 import { buildNarrationRoundText } from '../../app/narrationOrchestrator'
-import { isPersonalityModelReplyMode, resolveConfiguredReplyPipelineMode, resolveReplyPipelineMode, resolveSessionReplyPipelineMode, type ChatReplyPipelineMode, type ReplyWorkflowMode } from '../../app/chatReplyPipelineMode'
+import { isPersonalityModelReplyMode, resolveReplyPipelineMode, resolveSessionReplyPipelineMode, type ChatReplyPipelineMode, type ReplyWorkflowMode } from '../../app/chatReplyPipelineMode'
 import { parseChatInputRoute } from '../../app/chatInputRouter'
 import { extractDirectorDirectives } from '../../app/directorDirective'
+import {
+  buildReplyOrchestrationRouteMessages,
+  compareReplySituationDependencySnapshots,
+  parseReplyOrchestrationRouteDecision,
+  renderReplyOrchestrationRecentTail,
+  resolveHardReplyOrchestrationRoute,
+  type ReplyOrchestrationRouteDecision,
+  type ReplySituationDependencySnapshot
+} from '../../app/replyOrchestrationRoute'
+import { buildReplySituationDependencySnapshot } from '../../app/replySituationDependencySnapshot'
+import {
+  buildReplyExecutionAudit,
+  resolveReplyBackendComposition,
+  resolveReplyExecutionProfile,
+  type ReplyExecutionProfile
+} from '../../app/replyExecutionProfile'
+import { buildReplyExecutionReceipt } from '../../app/replyExecutionReceipt'
 import { buildFinalOutboundPrompt } from '../../app/chatPromptAssemblyStages'
 import {
   normalizePersonalityPlanBatchOutput,
@@ -160,7 +185,7 @@ import {
   type NarrativeSeedPredictedImpact
 } from '../../app/narrativeSeedImpactAgent'
 import { enqueueDeferredWorldEvolutionReport } from '../../app/deferredAgentEventQueue'
-import { hydrateSessionOrchestrationMaterials } from '../../app/sessionOrchestrationMaterialsAdapter'
+import { getHydratedLastScenario, hydrateSessionOrchestrationMaterials } from '../../app/sessionOrchestrationMaterialsAdapter'
 // 批次3（2026-07-07 范式优化）：subagent 注册表——runSubagent 统一做运行状态埋点 + 结构化调用（批次2）+ 解析；
 // 编剧升真 loop（2026-07-10 剧本系统优化批次3）：runScriptwriterLoop 由接缝层调用，本文件只装配
 // callModel（buildDeferredLoopModelCall taskId='scriptwriterConsult'）与取证工具集；旧 spec 注册表已退役。
@@ -219,6 +244,7 @@ import {
   registerTidiaoStatusScopeResumeHandler,
   markTidiaoStatusScopeDeclined,
   isTidiaoStatusScopeDeclined,
+  buildTidiaoStatusScopeCharacterOptions,
   buildZaoceBatchBrief,
   type TidiaoStatusScopePendingState,
   type TidiaoStatusScopeResolvedItem
@@ -270,6 +296,7 @@ import {
   normalizeSessionParticipantMembers,
   renderDirectorSceneContextFromSnapshot,
   resolveMessageDirectorBaseline,
+  invalidateSessionLastScenario,
   saveSessionLastScenario,
   withToolsearchOverrideProtocol
 } from '../../app/tidiaoCorrectionAssembly'
@@ -665,9 +692,9 @@ interface UseChatSendPipelineContext {
   canSeeNarrationDebug?: boolean | (() => boolean)
 }
 
-// 批次4：滚动会话记忆压缩的内存级节流表（sessionId → 上次压缩时的事实数）。模块级，跨发送保留；
-// 客户端会话对象不带 context_summary 列，故节流靠它而非持久化 watermark，重载后最多多压一次。
-const sessionMemoryRefreshThrottle = new Map<string, number>()
+// 批次4：同一会话的滚动记忆压缩单飞。真正的增量边界持久化在
+// chat_sessions.context_summary_message_id，重载或多窗口后也不会把旧事实整批重复折叠。
+const sessionMemoryRefreshInFlight = new Map<string, Promise<void>>()
 
 // 批次1d-B：退役「先行并行召回预热」（自动召回）。true=退役（默认）：提调链路不再自动全量召回，
 // 特殊料只走提调按需取料三件套（recallSemantic/searchWorldText/fetchUnitDetail），常规料（投影/身份/在场）
@@ -1133,6 +1160,18 @@ export function useChatSendPipeline({
       audit: PersonalityNarrationSubagentRunAudit
     } | null
   } | null = null
+  type ReplySituationCheckpointLifecycle = {
+    runId: number
+    sessionId: string
+    anchorMessageId: number
+    failureReason: string
+    invalidated: boolean
+    invalidationPromise: Promise<void> | null
+    pendingAssistantProjections: Set<Promise<void>>
+  }
+  // 检查点是轮级事务：新用户消息落库后先把旧 checkpoint 持久化失效；只有正文、旁白、
+  // 应执行的投影及事实提交全部成功，才允许用轮末依赖快照重新提交。
+  let activeReplySituationCheckpointLifecycle: ReplySituationCheckpointLifecycle | null = null
   // 叙事种子批次4：finishRound 后立即起跑预测；角色/旁白全部收束后再把实际落库消息交给事实核对。
   // 预测 promise 不进入角色生成 await 链，生命周期快照在 reset 前转交给后台事实提交。
   let activeNarrativeImpactLifecycle: {
@@ -1698,6 +1737,8 @@ export function useChatSendPipeline({
     taskRunId: string
     inputKind: ChatTurnInputKind
     replyMode: ChatTurnReplyMode
+    replyExecutionProfile?: ReplyExecutionProfile
+    replyOrchestrationDecision?: ReplyOrchestrationRouteDecision
     abortSignal?: AbortSignal
   }) {
     chatTurnRunner.begin({
@@ -1708,6 +1749,8 @@ export function useChatSendPipeline({
         targetId: input.targetId,
         taskRunId: input.taskRunId,
         replyMode: input.replyMode,
+        ...(input.replyExecutionProfile ? { replyExecutionProfile: input.replyExecutionProfile } : {}),
+        ...(input.replyOrchestrationDecision ? { replyOrchestrationDecision: input.replyOrchestrationDecision } : {}),
         abortSignal: input.abortSignal
       }
     })
@@ -1845,6 +1888,148 @@ export function useChatSendPipeline({
     }
   }
 
+  function markReplySituationCheckpointFailure(
+    reason: unknown,
+    lifecycle = activeReplySituationCheckpointLifecycle
+  ) {
+    if (!lifecycle || lifecycle.failureReason) return
+    lifecycle.failureReason = reason instanceof Error
+      ? reason.message
+      : String(reason || '本轮存在未完成的回复后置写入')
+  }
+
+  function registerReplySituationAssistantProjection(completion: Promise<void>) {
+    const lifecycle = activeReplySituationCheckpointLifecycle
+    if (!lifecycle) return
+    lifecycle.pendingAssistantProjections.add(completion)
+    void completion.then(
+      () => lifecycle.pendingAssistantProjections.delete(completion),
+      (error) => {
+        markReplySituationCheckpointFailure(error, lifecycle)
+        lifecycle.pendingAssistantProjections.delete(completion)
+      }
+    )
+  }
+
+  function startReplySituationCheckpointLifecycle(input: {
+    runId: number
+    sessionId: string
+    anchorMessageId: number
+  }): ReplySituationCheckpointLifecycle {
+    const lifecycle: ReplySituationCheckpointLifecycle = {
+      runId: input.runId,
+      sessionId: input.sessionId,
+      anchorMessageId: input.anchorMessageId,
+      failureReason: '',
+      invalidated: false,
+      invalidationPromise: null,
+      pendingAssistantProjections: new Set()
+    }
+    activeReplySituationCheckpointLifecycle = lifecycle
+    return lifecycle
+  }
+
+  async function ensureReplySituationCheckpointInvalidated(
+    lifecycle = activeReplySituationCheckpointLifecycle
+  ): Promise<void> {
+    if (!lifecycle || lifecycle.invalidated) return
+    if (!lifecycle.invalidationPromise) {
+      lifecycle.invalidationPromise = (async () => {
+        try {
+          await invalidateSessionLastScenario(
+            lifecycle.sessionId,
+            String(lifecycle.anchorMessageId || ''),
+            '本轮尚未完成，旧检查点已失效'
+          )
+          lifecycle.invalidated = true
+        } catch (error) {
+          markReplySituationCheckpointFailure(error, lifecycle)
+          throw error
+        } finally {
+          lifecycle.invalidationPromise = null
+        }
+      })()
+    }
+    await lifecycle.invalidationPromise
+  }
+
+  async function waitForReplySituationAssistantProjections(lifecycle: ReplySituationCheckpointLifecycle) {
+    while (lifecycle.pendingAssistantProjections.size > 0) {
+      const pending = [...lifecycle.pendingAssistantProjections]
+      const results = await Promise.allSettled(pending)
+      for (const result of results) {
+        if (result.status === 'rejected') markReplySituationCheckpointFailure(result.reason, lifecycle)
+      }
+    }
+  }
+
+  async function finalizeReplySituationCheckpoint(input: {
+    runId: number
+    last?: { code?: string; label?: string; summary?: string } | null
+  }): Promise<boolean> {
+    const lifecycle = activeReplySituationCheckpointLifecycle
+    if (!lifecycle || lifecycle.runId !== input.runId) return false
+    const roundDirector = activeRoundDirector
+    const inferredLast = input.last === undefined
+      ? roundDirector?.script?.scenarioCode
+        ? {
+            code: String(roundDirector.script.scenarioCode),
+            summary: String(roundDirector.script.situation || '').trim() || undefined
+          }
+        : null
+      : input.last
+    const hasUnstartedRoundStartNarration = Boolean(
+      roundDirector?.narrationCalls.some(isRoundStartNarrationCall)
+      && !roundDirector?.narrationStarted
+    )
+    const hasUnresolvedInterleavedNarration = Boolean(roundDirector?.narrationInterleavedPending.length)
+    if (hasUnstartedRoundStartNarration || hasUnresolvedInterleavedNarration) {
+      markReplySituationCheckpointFailure('本轮应生成旁白未全部完成', lifecycle)
+    }
+
+    await waitForReplySituationAssistantProjections(lifecycle)
+    // 等后台投影期间若已有新轮接管，旧轮只能退出，不能覆盖新轮刚写下的失效 tombstone。
+    if (activeReplySituationCheckpointLifecycle !== lifecycle) return false
+    await ensureReplySituationCheckpointInvalidated(lifecycle)
+    const scenarioCode = String(inferredLast?.code || '').trim()
+    if (lifecycle.failureReason || !scenarioCode) {
+      try {
+        await invalidateSessionLastScenario(
+          lifecycle.sessionId,
+          String(lifecycle.anchorMessageId || ''),
+          lifecycle.failureReason || '本轮没有合法 scenarioCode，旧检查点已失效'
+        )
+      } catch (error) {
+        console.error('[reply-situation-checkpoint] 保持检查点失效状态失败:', error)
+      }
+      return false
+    }
+
+    try {
+      // 只能在角色、旁白、投影和事实提交全部收束后读取；开局/统筹阶段的版本不能作为复用依据。
+      const projection = await fetchOrchestrationWorkspaceProjection(lifecycle.sessionId)
+      const dependencySnapshot = buildCurrentReplySituationDependencySnapshot({
+        workspace: projection.workspace,
+        director: projection.director
+      })
+      await saveSessionLastScenario(
+        lifecycle.sessionId,
+        {
+          code: scenarioCode,
+          ...(String(inferredLast?.label || '').trim() ? { label: String(inferredLast?.label).trim() } : {}),
+          ...(String(inferredLast?.summary || '').trim() ? { summary: String(inferredLast?.summary).trim() } : {})
+        },
+        String(lifecycle.anchorMessageId || ''),
+        dependencySnapshot
+      )
+      return true
+    } catch (error) {
+      markReplySituationCheckpointFailure(error, lifecycle)
+      console.warn('[reply-situation-checkpoint] 轮末检查点提交失败，继续保持失效状态:', error)
+      return false
+    }
+  }
+
   function resetActivePipelineState() {
     activePipelineSessionId = ''
     activePipelineInputMessageId = 0
@@ -1855,6 +2040,7 @@ export function useChatSendPipeline({
     activePipelineDirectorDirectives = []
     activeRoundDirector = null
     activeNarrativeImpactLifecycle = null
+    activeReplySituationCheckpointLifecycle = null
     chatTurnRunner.reset()
     clearCurrentAiUsageContext()
   }
@@ -1955,20 +2141,35 @@ export function useChatSendPipeline({
     activePipelineTidiaoRunId = beginTidiaoRun()
     clearTidiaoDirectorStreamRound()
     try {
+      await hydrateSessionOrchestrationMaterials(run.sessionId)
+      startReplySituationCheckpointLifecycle({
+        runId: postRoundRunId,
+        sessionId: run.sessionId,
+        anchorMessageId: run.inputMessageId
+      })
       const existingRoundFacts = collectPersistedRoundFacts(run.sessionId, run.inputMessageId)
       const initialInsertAfterMessageId = Number(existingRoundFacts[existingRoundFacts.length - 1]?.id || run.inputMessageId)
       const formalMembers = normalizeChatSessionCharacterParticipants(session)
         .map((participant) => ({ characterId: String(participant.characterId || '').trim() }))
         .filter((participant) => Boolean(participant.characterId))
-      if (!formalMembers.length) throw new Error('轮后提调无法恢复正式会话成员')
-      const replyOrder = await decideRoundDirector({
-        userText,
-        groupMembers: formalMembers,
-        targetId,
-        postRoundFactReconciliation: true,
-        postRoundTriggerKind: run.triggerKind,
-        suppressAudienceOutputs
-      })
+      if (!formalMembers.length) {
+        await ensureReplySituationCheckpointInvalidated()
+        throw new Error('轮后提调无法恢复正式会话成员')
+      }
+      const replyOrder = await (async () => {
+        try {
+          return await decideRoundDirector({
+            userText,
+            groupMembers: formalMembers,
+            targetId,
+            postRoundFactReconciliation: true,
+            postRoundTriggerKind: run.triggerKind,
+            suppressAudienceOutputs
+          })
+        } finally {
+          await ensureReplySituationCheckpointInvalidated()
+        }
+      })()
       // 私密动作的直出旁白已经作为同组私密消息落库；轮后只准核账，不能再生成会被角色读到的旁白/回复。
       if (suppressAudienceOutputs && activeRoundDirector) {
         activeRoundDirector.narrationCalls = []
@@ -1976,19 +2177,23 @@ export function useChatSendPipeline({
       }
       const executableReplyOrder = suppressAudienceOutputs ? [] : (replyOrder || [])
       if (activeRoundDirector && (executableReplyOrder.length > 0 || activeRoundDirector.narrationCalls.length > 0)) {
-        await executeMixedGroupChatParallel({
+        const replyCount = await executeMixedGroupChatParallel({
           targetId,
           userText,
           replyOrder: executableReplyOrder,
           runId: postRoundRunId,
           initialInsertAfterMessageId
         })
+        if (replyCount < executableReplyOrder.length) {
+          markReplySituationCheckpointFailure(`轮后补演角色正文落库不完整（${replyCount}/${executableReplyOrder.length}）`)
+        }
         // 普通轮允许纯描写旁白后台收束；轮后运行是持久任务，必须等补演旁白真正落库后才能核账并标成功。
         if (activeRoundDirector?.roundDirectorNarration) {
           await activeRoundDirector.roundDirectorNarration.completion
         }
       }
       await scheduleNarrativeFactCommit({ throwOnError: true })
+      await finalizeReplySituationCheckpoint({ runId: postRoundRunId })
       const messageIds = collectPersistedRoundFacts(run.sessionId, run.inputMessageId).map((message) => message.id)
       return {
         operationCount: Number(Boolean(activeNarrativeImpactLifecycle?.committedChanges)) + (activeNarrativeImpactLifecycle?.presenceProposals.length || 0),
@@ -2999,6 +3204,53 @@ export function useChatSendPipeline({
     )
   }
 
+  function resolveRoundReplyBackendState(
+    targetId: string,
+    session: Record<string, unknown> | null,
+    group: boolean,
+    selectedCharacterIds?: readonly string[]
+  ): { hasPersonalityModel: boolean; mixedBackends: boolean } {
+    const characterIds = selectedCharacterIds !== undefined
+      ? [...new Set(selectedCharacterIds.map((item) => String(item || '').trim()).filter(Boolean))]
+      : group
+        ? normalizeChatSessionCharacterParticipants(session)
+            .map((item) => String(item.characterId || '').trim())
+            .filter(Boolean)
+        : [String(targetId || '').trim()].filter(Boolean)
+    const evaluationCharacterIds = selectedCharacterIds !== undefined
+      ? characterIds
+      : characterIds.length ? characterIds : [targetId]
+    const personalityFlags = evaluationCharacterIds
+      .map((characterId) => shouldUsePersonalityModelReply(characterId))
+    return resolveReplyBackendComposition(personalityFlags)
+  }
+
+  function updateRoundReplyExecutionProfileForSelectedSpeakers(input: {
+    targetId: string
+    session: Record<string, unknown> | null
+    group: boolean
+    characterIds: readonly string[]
+  }) {
+    const turnContext = chatTurnRunner.getContext()
+    const currentProfile = turnContext?.replyExecutionProfile
+    if (!currentProfile || currentProfile.basis.purePrompt || currentProfile.basis.focusedAction) return
+    const backendState = resolveRoundReplyBackendState(
+      input.targetId,
+      input.session,
+      input.group,
+      input.characterIds
+    )
+    chatTurnRunner.updateContext({
+      replyExecutionProfile: resolveReplyExecutionProfile({
+        route: currentProfile.basis.route,
+        hasPersonalityModel: backendState.hasPersonalityModel,
+        mixedBackends: backendState.mixedBackends,
+        purePrompt: false,
+        focusedAction: false
+      })
+    })
+  }
+
   function shouldUsePurePromptReply(): boolean {
     const session = getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null
     return resolveSessionReplyPipelineMode(session) === 'pure_prompt'
@@ -3011,6 +3263,120 @@ export function useChatSendPipeline({
     if (shouldUsePersonalityModelReply(targetId)) return 'personality_model'
     if (sessionMode === 'personality_model') return sessionMode
     return 'normal_recall'
+  }
+
+  function buildCurrentReplySituationDependencySnapshot(input: {
+    workspace: OrchestrationWorkspaceProjection
+    director: DirectorOrchestrationProjection
+    currentSession?: Record<string, unknown> | null
+  }): ReplySituationDependencySnapshot {
+    const session = input.currentSession
+      ?? getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null
+    const personalityRevision = normalizeChatSessionCharacterParticipants(session)
+      .map((member: any) => {
+        const characterId = String(member.characterId || member.character_id || '').trim()
+        const character = (charStore.characters || []).find(
+          (item: any) => String(item?.id || '') === characterId
+        ) as Record<string, unknown> | undefined
+        return {
+          characterId,
+          modelPath: String(character?.personalityModelPath ?? character?.personality_model_path ?? ''),
+          version: character?.version ?? character?.updatedAt ?? character?.updated_at ?? ''
+        }
+      })
+      .filter((item) => Boolean(item.characterId))
+      .sort((left, right) => left.characterId < right.characterId ? -1 : left.characterId > right.characterId ? 1 : 0)
+    return buildReplySituationDependencySnapshot({
+      workspace: input.workspace,
+      director: input.director,
+      personalityRevision,
+      promptPresetRevision: resolveUserCustomPromptPresetContent()
+    })
+  }
+
+  async function decideAutomaticReplyOrchestration(input: {
+    sessionId: string
+    userText: string
+    attachments: ChatImageAttachment[]
+    abortSignal?: AbortSignal
+  }): Promise<{
+    decision: ReplyOrchestrationRouteDecision
+    directorProjection: DirectorOrchestrationProjection | null
+    dependencySnapshot: ReplySituationDependencySnapshot | null
+  }> {
+    const previousScenario = getHydratedLastScenario(input.sessionId)
+    const currentSession = getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null
+    const routeInput = {
+      previousScenario,
+      currentUserInput: input.userText,
+      establishedContext: String(currentSession?.contextSummary ?? currentSession?.context_summary ?? '').trim(),
+      recentTail: renderReplyOrchestrationRecentTail(
+        getCurrentMessageList(chatStore) as Array<Record<string, unknown>>
+      ),
+      sceneContext: readDirectorSceneContextNow(),
+      hasAttachments: input.attachments.length > 0,
+      hasPrivateDirectorDirectives: activePipelineDirectorDirectives.length > 0,
+      forcedCharacterIds: (mentionSelectedChars.value || []).map((id) => String(id || '').trim()).filter(Boolean),
+      excludedCharacterIds: (mentionExcludedChars.value || []).map((id) => String(id || '').trim()).filter(Boolean)
+    }
+    const preliminaryHardDecision = resolveHardReplyOrchestrationRoute(routeInput)
+    if (preliminaryHardDecision) {
+      return { decision: preliminaryHardDecision, directorProjection: null, dependencySnapshot: null }
+    }
+
+    let directorProjection: DirectorOrchestrationProjection | null = null
+    let currentDependencySnapshot: ReplySituationDependencySnapshot | null = null
+    try {
+      const projectionBundle = await fetchOrchestrationWorkspaceProjection(input.sessionId)
+      directorProjection = projectionBundle.director
+      currentDependencySnapshot = buildCurrentReplySituationDependencySnapshot({
+        workspace: projectionBundle.workspace,
+        director: projectionBundle.director,
+        currentSession
+      })
+    } catch (error) {
+      console.warn('读取情境依赖版本失败，本轮续接判定按 unknown 继续保守轻判:', error)
+    }
+    const versionedRouteInput = { ...routeInput, currentDependencySnapshot }
+    const versionHardDecision = resolveHardReplyOrchestrationRoute(versionedRouteInput)
+    if (versionHardDecision) {
+      return { decision: versionHardDecision, directorProjection, dependencySnapshot: currentDependencySnapshot }
+    }
+
+    const messages = buildReplyOrchestrationRouteMessages(versionedRouteInput)
+    const dependencyComparison = compareReplySituationDependencySnapshots(
+      previousScenario?.dependencySnapshot,
+      currentDependencySnapshot
+    )
+    try {
+      const output = await callAI(messages, {
+        ...buildTaskModelAiOptions(readBrainAgentConfigFromList(settingStore.agentModelConfigs) as any, 'replyRouteJudge', {
+          maxTokens: 260,
+          temperature: 0,
+          thinking: 'disabled'
+        }),
+        feature: 'agent',
+        logLabel: 'reply-situation-continuity-judge',
+        usageLabel: '回复路由：情境续接轻判',
+        placeLabel: `会话：${getTargetName(getActiveTargetId(chatStore))}`,
+        placeType: shouldUseGroupChatPipeline(getActiveTargetId(chatStore), currentSession) ? 'group' : 'single',
+        ...(input.abortSignal ? { signal: input.abortSignal } : {})
+      })
+      const decision = parseReplyOrchestrationRouteDecision(
+        normalizeAiOutputText(stripAiThoughtContent(String(output || ''))),
+        previousScenario,
+        dependencyComparison
+      )
+      return { decision, directorProjection, dependencySnapshot: currentDependencySnapshot }
+    } catch (error) {
+      if (isAbortError(error) || input.abortSignal?.aborted) throw error
+      console.warn('情境续接轻判失败，已保守回退完整提调:', error)
+      return {
+        decision: parseReplyOrchestrationRouteDecision('', previousScenario, dependencyComparison),
+        directorProjection,
+        dependencySnapshot: currentDependencySnapshot
+      }
+    }
   }
 
   function normalizePersonalityRecallSectionsFromResult(result: PreparedAIRecallResult | void | null): PersonalityRecallSections | null {
@@ -3039,20 +3405,34 @@ export function useChatSendPipeline({
     embeddedProjectionError?: string
     embeddedProjectionRequired?: boolean
   }) {
+    const checkpointLifecycle = input.stage === 'assistant'
+      ? activeReplySituationCheckpointLifecycle
+      : null
     if (!input.sessionId || !input.messageId) {
       throw new Error(input.stage === 'user' ? '回复链路缺少用户消息 ID，无法运行消息投影' : '回复链路缺少回复消息 ID，无法运行消息投影')
     }
-    const embeddedProjectionText = String(input.embeddedProjectionText || '').trim()
-    const embeddedProjectionError = String(input.embeddedProjectionError || '').trim()
-    if (embeddedProjectionText || embeddedProjectionError || input.embeddedProjectionRequired) {
-      await saveEmbeddedChatMessageProjectionBySessionId(input.sessionId, input.messageId, {
-        projectionText: embeddedProjectionText,
-        failureReason: embeddedProjectionError,
-        failureStage: embeddedProjectionText ? '' : 'parse_embedded_projection'
-      })
-      return
+    try {
+      const embeddedProjectionText = String(input.embeddedProjectionText || '').trim()
+      const embeddedProjectionError = String(input.embeddedProjectionError || '').trim()
+      if (embeddedProjectionText || embeddedProjectionError || input.embeddedProjectionRequired) {
+        await saveEmbeddedChatMessageProjectionBySessionId(input.sessionId, input.messageId, {
+          projectionText: embeddedProjectionText,
+          failureReason: embeddedProjectionError,
+          failureStage: embeddedProjectionText ? '' : 'parse_embedded_projection'
+        })
+        if (checkpointLifecycle && input.embeddedProjectionRequired && !embeddedProjectionText) {
+          markReplySituationCheckpointFailure(
+            embeddedProjectionError || '助手消息投影没有产出合法结果',
+            checkpointLifecycle
+          )
+        }
+        return
+      }
+      await runChatMessageProjectionBySessionId(input.sessionId, input.messageId, { promptLogMode: 'background' })
+    } catch (error) {
+      if (checkpointLifecycle) markReplySituationCheckpointFailure(error, checkpointLifecycle)
+      throw error
     }
-    await runChatMessageProjectionBySessionId(input.sessionId, input.messageId)
   }
 
   function getVisibleTextFromEmbeddedProjectionOutput(rawOutput: string): string {
@@ -3065,6 +3445,7 @@ export function useChatSendPipeline({
     runKind?: 'auto' | 'manual'
     sourceLabel?: string
   }) {
+    const checkpointLifecycle = activeReplySituationCheckpointLifecycle
     const sessionId = String(input.sessionId || '').trim()
     const characterId = String(input.characterId || '').trim()
     if (!sessionId || !characterId) return null
@@ -3094,6 +3475,12 @@ export function useChatSendPipeline({
       const failedEvents = Array.isArray(data.failedEvents) ? data.failedEvents : []
       const detail = `已隐藏 ${Number(data.hiddenProjectionCount || 0)} 条投影，写入 ${Array.isArray(data.successEventIds) ? data.successEventIds.length : 0} 个事件。`
       if (status === 'failed' || failedEvents.length) {
+        if (checkpointLifecycle) {
+          markReplySituationCheckpointFailure(
+            status === 'failed' ? '投影写轨迹失败' : '投影写轨迹部分失败',
+            checkpointLifecycle
+          )
+        }
         runtimeStore?.failAgentTaskNotice?.({
           id: noticeId,
           message: status === 'failed' ? '投影写轨迹失败' : '投影写轨迹部分失败',
@@ -3113,6 +3500,7 @@ export function useChatSendPipeline({
       }
       return data
     } catch (error) {
+      if (checkpointLifecycle) markReplySituationCheckpointFailure(error, checkpointLifecycle)
       runtimeStore?.failAgentTaskNotice?.({
         id: noticeId,
         message: '投影写轨迹失败',
@@ -3136,7 +3524,8 @@ export function useChatSendPipeline({
         speakerName: input.speakerName,
         targetId: input.targetId,
         finalPrompt: input.trace.finalPrompt,
-        promptBlocks: input.trace.promptBlocks
+        promptBlocks: input.trace.promptBlocks,
+        logKind: 'internal_agent'
       })
       return String(result.id || '')
     } catch (error) {
@@ -3269,11 +3658,11 @@ export function useChatSendPipeline({
    * 批次4：回复后台滚动会话记忆压缩（自研借 Mastra Observational Memory 思路）。
    * 长会话达阈值时，把较早投影事实（滑出最近窗口的）用廉价模型浓缩进会话 context_summary，
    * 服务端组装上下文时注入回去，避免长会话丢关键记忆。fire-and-forget，失败绝不影响回复。
-   * 节流：内存级 Map 记录上次压缩时的事实数，新增达步长才重算（客户端会话对象不带 context_summary，
-   * 故 watermark 走全量较早折叠 + 尽力读 store 现有摘要做增量；持久化到 DB 列由服务端注入侧消费）。
+   * 节流：持久化 messageId watermark 决定本次只折叠尚未进入摘要的较早事实；同会话并发调用单飞。
    */
   const maybeRefreshSessionMemory = (sessionId: string, projectionItems: unknown): void => {
-    void (async () => {
+    if (sessionMemoryRefreshInFlight.has(sessionId)) return
+    const refresh = (async () => {
       try {
         if (!sessionId || typeof callAI !== 'function' || !Array.isArray(projectionItems)) return
         const facts: SessionMemoryFact[] = projectionItems
@@ -3286,13 +3675,20 @@ export function useChatSendPipeline({
             }
           })
           .filter((fact) => fact.messageId > 0 && fact.fact)
-        if (!shouldRefreshSessionMemory(facts)) return
-        // 内存节流：本会话距上次压缩新增事实数 < 步长则跳过（重载后最多多压一次，可接受）。
-        const lastCount = sessionMemoryRefreshThrottle.get(sessionId) || 0
-        if (facts.length - lastCount < SESSION_MEMORY_REFRESH_STEP) return
-        const { foldFacts } = selectSessionMemoryFold(facts, { keepRecent: SESSION_MEMORY_KEEP_RECENT })
-        if (!foldFacts.length) return
         const storeSession = getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null
+        const watermarkMessageId = Math.max(0, Math.trunc(Number(
+          storeSession?.contextSummaryMessageId ?? storeSession?.context_summary_message_id ?? 0
+        ) || 0))
+        if (!shouldRefreshSessionMemory(facts, {
+          watermarkMessageId,
+          keepRecent: SESSION_MEMORY_KEEP_RECENT,
+          step: SESSION_MEMORY_REFRESH_STEP
+        })) return
+        const { foldFacts, latestFoldedMessageId } = selectSessionMemoryFold(facts, {
+          watermarkMessageId,
+          keepRecent: SESSION_MEMORY_KEEP_RECENT
+        })
+        if (!foldFacts.length) return
         const existingSummary = String(storeSession?.context_summary ?? storeSession?.contextSummary ?? '')
         const agentConfig = readBrainAgentConfigFromList(settingStore.agentModelConfigs)
         const output = await callAI(buildSessionMemoryPrompt(existingSummary, foldFacts) as Array<{ role: ChatRole; content: string }>, {
@@ -3303,13 +3699,22 @@ export function useChatSendPipeline({
         const summary = parseSessionMemorySummaryOutput(output)
         if (!summary) return
         if (typeof chatStore.updateSession === 'function') {
-          await chatStore.updateSession(sessionId, { context_summary: summary, last_summary_time: new Date().toISOString() })
+          await chatStore.updateSession(sessionId, {
+            context_summary: summary,
+            last_summary_time: new Date().toISOString(),
+            context_summary_message_id: latestFoldedMessageId
+          })
         }
-        sessionMemoryRefreshThrottle.set(sessionId, facts.length)
       } catch (error) {
         console.error('会话记忆压缩失败（不影响回复）:', error)
       }
     })()
+    sessionMemoryRefreshInFlight.set(sessionId, refresh)
+    void refresh.finally(() => {
+      if (sessionMemoryRefreshInFlight.get(sessionId) === refresh) {
+        sessionMemoryRefreshInFlight.delete(sessionId)
+      }
+    })
   }
 
   // 通用回复工作流入口（ReplyWorkflow）：personality_model 与 normal_recall 共用投影、召回、情境、
@@ -3355,7 +3760,7 @@ export function useChatSendPipeline({
      *  缺省（开关关）=undefined，分镜走原 compressedContext + 照常上报 projection/context 过程轨步骤，零回归。 */
     downstreamProjectionContext?: string
     /** 批B·人格模型按需直通道（2026-07-13）：提调判本轮该角色 planMode=direct 时同轮直写的回复计划（第三视角）。
-     *  非空即跳过编排轮+候选轮+ReRanker 评审三段，形状复用 normal_recall 单计划协议（skipReview 等价）直填正文轮；
+     *  非空即跳过编排轮与模型候选生成；personality_model 只在本地确定性直通变体间做一次人格评分，normal_recall 直接使用单计划；
      *  缺省/空串=personality，走原 harness 全链路，零回归。 */
     directPlan?: string
     /** 轻量提调规划与 directPlan 同源的表达占比；快速回复必须显式提供，旧直通道缺省仍可为 null。 */
@@ -3392,7 +3797,11 @@ export function useChatSendPipeline({
     // 只有它进入 ReRanker 评审；normal_recall 单计划跳过评审，未上传人格模型也必须能正常回复。
     const character = resolveReplyTargetCharacter(input.speakerTargetId || input.targetId)
     const characterIdentity = buildPersonalityCharacterIdentity(character, input.speakerName)
-    const personalityModelPath = String((character as Record<string, unknown> | null)?.personalityModelPath || '').trim()
+    const personalityModelPath = String(
+      (character as Record<string, unknown> | null)?.personalityModelPath
+      ?? (character as Record<string, unknown> | null)?.personality_model_path
+      ?? ''
+    ).trim()
     if (input.mode === 'personality_model' && !personalityModelPath) {
       throw new Error('当前回复角色未上传人格模型，无法进行人格模型 ReRanker 打分')
     }
@@ -3517,7 +3926,7 @@ export function useChatSendPipeline({
       }
     }
     // 批B·人格模型按需直通道（2026-07-13）：提调若判本轮该角色 planMode=direct，会同轮直写 plan——
-    // 这里整段跳过编排 harness（编排轮+候选轮+ReRanker 评审），形状复用 normal_recall 单计划协议（skipReview 等价）；
+    // 这里跳过编排 harness 与模型候选生成；人格 profile 只跑一次轻量人格评分，普通 profile 单计划直达；
     // 未传 directPlan（personality/缺省）时走 else 原 harness 全链路，零回归。
     const directPlanText = String(input.directPlan || '').trim()
     let harnessResult: Awaited<ReturnType<typeof runReplyPlanOrchestratorHarness>> | null = null
@@ -3532,12 +3941,64 @@ export function useChatSendPipeline({
       // F2 群聊分镜已下发本轮情境（providedScenario），direct 分支直接用它，无需再跑 harness 推导。
       resolvedScenarioCode = String(input.providedScenario?.code || '').trim()
       scenarioMountedPromptText = buildScenarioMountedPromptText(orchestratorConfig, resolvedScenarioCode)
-      const directCandidate: ReplyPlanCandidate = { id: 'direct_plan_1', strategy: '', strategyLabel: '', intensity: '', content: directPlanText }
-      candidatePlans = [directCandidate]
-      topPlans = [directCandidate]
+      const directCandidates: ReplyPlanCandidate[] = input.mode === 'personality_model'
+        ? buildFastReplyPersonalityPlanCandidates(directPlanText)
+        : [{ id: 'direct_plan_1', strategy: '', strategyLabel: '', intensity: '', content: directPlanText }]
+      candidatePlans = directCandidates
+      topPlans = directCandidates.slice(0, 1)
       expressionMix = input.directExpressionMix || null
       wordCountAdvice = input.directWordCountAdvice || null
       rerankerDiagnostics = undefined
+      // “快速/完整”是统筹深度，“人格/普通”是回复后端。稳定续话不再跑编排模型，
+      // 但有人格模型时仍用它在三条确定性直通策略间评分，确保人格后端没有被快速路径静默绕过。
+      if (input.mode === 'personality_model' && directCandidates.length > 1) {
+        input.onStep?.('review', 'running')
+        try {
+          const [{ scorePersonalityPlansRouted }, { fetchMyPersonalityInferencePrefs }] = await Promise.all([
+            import('../../app/personalityRerankerRouter'),
+            import('../../repositories/personalityInferencePrefsRepository')
+          ])
+          const inferencePrefs = await fetchMyPersonalityInferencePrefs()
+          const rerankerResult = await scorePersonalityPlansRouted({
+            personalityModelPath,
+            situation: projectionContext.compressedContext,
+            plans: directCandidates.map((candidate) => String(candidate.content || ''))
+          }, {
+            abortSignal: input.abortSignal,
+            mode: inferencePrefs.mode,
+            serverAllowed: inferencePrefs.serverAllowed
+          })
+          if (rerankerResult.scores.length !== directCandidates.length) {
+            throw new Error(`人格模型 ReRanker 评分数量不匹配：候选 ${directCandidates.length} 条，得分 ${rerankerResult.scores.length} 条`)
+          }
+          const scores: PersonalityPlanRerankerScore[] = directCandidates.map((candidate, index) => ({
+            candidateId: candidate.id || `reuse_direct_${index + 1}`,
+            score: rerankerResult.scores[index]
+          }))
+          topPlans = rankPersonalityPlanCandidates(directCandidates, scores, 1)
+          candidatePlans = directCandidates.map((candidate, index) => ({
+            ...candidate,
+            score: scores[index]?.score
+          }))
+          rerankerDiagnostics = {
+            ...(rerankerResult.diagnostics as unknown as Record<string, unknown>),
+            executionPolicy: 'reuse_direct_personality_rerank',
+            selectedPlanId: String(topPlans[0]?.id || '')
+          }
+          input.onStep?.('review', 'done')
+        } catch (error) {
+          if (isAbortError(error) || input.abortSignal?.aborted) throw error
+          const reason = error instanceof Error ? error.message : String(error || '人格模型评分失败')
+          rerankerDiagnostics = {
+            executionPolicy: 'reuse_direct_personality_rerank',
+            degraded: true,
+            reason,
+            selectedPlanId: String(topPlans[0]?.id || '')
+          }
+          input.onReviewDegraded?.(reason)
+          input.onStep?.('review', 'done')
+        }
+      }
     } else {
     harnessResult = await runReplyPlanOrchestratorHarness({
       mode: input.mode,
@@ -4333,6 +4794,7 @@ export function useChatSendPipeline({
     // 改路由到本轮 directorStream 旁白镜的「生成旁白」节点（running→done/failed）。捕获本轮 directorStream runId
     // （update 内按 runId 自守，新轮起即丢弃迟到生成态），并打点起始时间算单步耗时。
     const narrationDirectorRunId = activePipelineTidiaoRunId
+    const checkpointLifecycle = activeReplySituationCheckpointLifecycle
     const narrationGenStartedAt = Date.now()
     let narrationGenFailed = false
     const messages = input.messagesOverride || (getCurrentMessageList(chatStore) as Array<Record<string, unknown>>)
@@ -4383,6 +4845,7 @@ export function useChatSendPipeline({
         if (processed >= infoBearingCount) resolveInfoBearingSettled()
       }
       if (input.abortSignal?.aborted || isStopRequested(chatStore) || !isPipelineRunCurrent(input.runId)) {
+        if (checkpointLifecycle) markReplySituationCheckpointFailure('本轮应生成旁白被中断，未完成落库', checkpointLifecycle)
         advanceAndRelease()
         return
       }
@@ -4391,6 +4854,7 @@ export function useChatSendPipeline({
         : [String((call as any).profileId || '')].filter(Boolean)
       const profile = input.profiles.find((item) => item.id === callProfileIds[0])
       if (!profile) {
+        if (checkpointLifecycle) markReplySituationCheckpointFailure('旁白配置缺失，未能完成本轮应生成旁白', checkpointLifecycle)
         // 找不到 profile 也要推进闸门计数，否则信息承载段缺一条就永远卡住角色回复上下文。
         advanceAndRelease()
         return
@@ -4432,6 +4896,7 @@ export function useChatSendPipeline({
         )
       } catch (error) {
         narrationGenFailed = true
+        if (checkpointLifecycle) markReplySituationCheckpointFailure(error, checkpointLifecycle)
         if (!(isAbortError(error) || input.abortSignal?.aborted)) {
           registerRoundRetryUnit({
             id: `narration:${profile.id}:${callIndex}`,
@@ -4453,8 +4918,18 @@ export function useChatSendPipeline({
     const completion = (async () => {
       try {
         await Promise.all(orderedCalls.map((call, callIndex) => runOneOrderedCall(call, callIndex)))
+        if (!input.abortSignal?.aborted && audit.messageIds.length < orderedCalls.length) {
+          narrationGenFailed = true
+          if (checkpointLifecycle) {
+            markReplySituationCheckpointFailure(
+              `本轮旁白落库不完整（${audit.messageIds.length}/${orderedCalls.length}）`,
+              checkpointLifecycle
+            )
+          }
+        }
       } catch (error) {
         narrationGenFailed = true
+        if (checkpointLifecycle) markReplySituationCheckpointFailure(error, checkpointLifecycle)
         if (!isAbortError(error)) console.warn('导演 loop 旁白正文生成失败:', error)
       } finally {
         // 兜底：异常也要放行，避免角色回复上下文构建永久等待。
@@ -4503,7 +4978,10 @@ export function useChatSendPipeline({
     }
     director.narrationInterleavedPending = rest
     const roundNarrationProfiles = resolvePersonalityNarrationSubagentProfiles(getChatStoreCurrentSession(chatStore) as any)
-    if (!roundNarrationProfiles.length) return
+    if (!roundNarrationProfiles.length) {
+      markReplySituationCheckpointFailure('旁白配置缺失，未能完成本轮应生成旁白')
+      return
+    }
     const baseMessages = getCurrentMessageList(chatStore) as Array<Record<string, unknown>>
     // 内存伪消息：锚点角色刚生成完、尚未落库的正文——只供旁白模型读「聊天记录」用，不进 store、不落库、无 id
     //（无 id 意味着投影 fact 查找表命中不到它，天然兜底读原文——这正是我们要的：读它当下最新的内存正文）。
@@ -4589,7 +5067,10 @@ export function useChatSendPipeline({
     }
     director.narrationInterleavedPending = rest
     const roundNarrationProfiles = resolvePersonalityNarrationSubagentProfiles(getChatStoreCurrentSession(chatStore) as any)
-    if (!roundNarrationProfiles.length) return
+    if (!roundNarrationProfiles.length) {
+      markReplySituationCheckpointFailure('旁白配置缺失，未能完成本轮应生成旁白')
+      return
+    }
     const started = startDirectorNarrationCompletion({
       targetId: input.targetId,
       sessionId: activePipelineSessionId || getActiveSessionId(chatStore),
@@ -4644,7 +5125,8 @@ export function useChatSendPipeline({
     const speakerTargetId = String(input.speakerTargetId || input.targetId || '').trim()
     const replyMode = resolveReplyPipelineModeForTarget(speakerTargetId)
     if (messageKind === 'caps_reply' || replyMode === 'personality_model' || replyMode === 'pure_prompt') return
-    void (async () => {
+    const checkpointLifecycle = activeReplySituationCheckpointLifecycle
+    const completion = (async () => {
       try {
         await runReplyContextProjectionForMessage({
           sessionId: input.sessionId,
@@ -4661,10 +5143,12 @@ export function useChatSendPipeline({
           sourceLabel: '普通召回'
         })
       } catch (error) {
+        if (checkpointLifecycle) markReplySituationCheckpointFailure(error, checkpointLifecycle)
         console.warn('普通回复投影写轨迹触发失败:', error)
         toast(`投影写轨迹触发失败：${getErrorMessage(error)}`, 'error', 8000)
       }
     })()
+    registerReplySituationAssistantProjection(completion)
   }
 
   async function runUserNarrationCommandFromInput(targetId: string, command: UserNarrationCommand) {
@@ -5016,13 +5500,13 @@ export function useChatSendPipeline({
       /** 2026-07-06 纠偏生成新角色消息：本条消息的导演方向覆盖（纠偏轮 activeRoundDirector 已复位，
        *  方向由纠偏 loop 的 addCastDirection 直接传入；缺省=照旧读 activeRoundDirector）。 */
       directorDirection?: string
-      /** 快速回复的单计划直通：由轮级快速规划器生成，跳过候选计划与评审，但仍走正式角色上下文和落库链。 */
+      /** 单计划直通：跳过候选计划与评审，但仍走正式角色上下文和落库链。 */
       directPlan?: string
-      /** 快速回复提调规划提示：只约束提调如何规划当前角色消息，不直接充当最终回复计划。 */
+      /** 稳定续话的简短正文边界：不调用提调规划模型，直接作为 directPlan 交给正文链。 */
       fastReplyPlanningHint?: string
-      /** 快速回复：提调先产写作计划，正式角色消息模型再结合用户可编辑提示词库成文。 */
+      /** 稳定续话直通：跳过整轮提调、写作计划和评审，正文模型按最近历史与必要人格资料自然回复。 */
       fastReply?: boolean
-      /** 快速回复不在角色分镜内生成旁白；可见叙事完成后统一交给轮后提调核账。 */
+      /** 稳定续话不生成旁白，也不重复运行轮后提调；用户与角色消息仍各自投影。 */
       suppressNarration?: boolean
       /** 穿插旁白预生成（串行压缩批C1-②·2026-07-13）：角色正文生成完成的瞬间（落库前）触发——调用方据此
        *  预起跑该角色名下穿插旁白（及群聊最后一位/单聊时一并预起跑 round_end 段）。不落库、不影响本条消息
@@ -5092,9 +5576,6 @@ export function useChatSendPipeline({
     let directPlan = options.directorDirection
       ? ''
       : String(options.directPlan || activeRoundDirector?.castPlans?.get(speakerTargetId || target)?.plan || '').trim()
-    let directExpressionMix: ReplyPlanExpressionMix | null = null
-    let directWordCountAdvice: ReplyPlanWordCountAdvice | null = null
-    let fastReplyPlanningPromptLogId = ''
 
     // 回复过程轨（ReplyWorkflow 通用）：生成投影/读取投影后，召回与判情境并行，再生成计划（人格模型多计划+评审，普通召回单计划）/组织回复。
     // 状态实时写到本地流式占位消息的 _processTrace 上，由 ChatMessageStream 渲染折叠过程栏；mode 决定工作流轴步骤清单。
@@ -5217,7 +5698,56 @@ export function useChatSendPipeline({
 
     let personalityModelReplyStarted = false
     let personalityTracePayload: Record<string, unknown> | null = null
-    const persistPersonalityModelFailureTrace = async (error: unknown, outputPromptLogId = '', failureMessageId = 0) => {
+    const readCompletedExecutionStages = () => Object.entries(processTraceState.steps)
+      .filter(([, status]) => status === 'done')
+      .map(([stepId]) => stepId)
+    const inferExecutionFailureStage = (fallback = 'reply_workflow') => {
+      const failed = Object.entries(processTraceState.steps)
+        .reverse()
+        .find(([, status]) => status === 'failed' || status === 'running' || status === 'retry')
+      return failed?.[0] || fallback
+    }
+    const persistReplyExecutionFailureReceipt = async (
+      error: unknown,
+      outputPromptLogId = '',
+      failureMessageId = 0,
+      failureStage = ''
+    ) => {
+      if (!generationAttemptId || !sessionId) return
+      const isPurePromptReply = shouldUsePurePromptReply()
+      const isPersonalityModelReply = !isPurePromptReply && shouldUsePersonalityModelReply(speakerTargetId || target)
+      const turnExecutionContext = chatTurnRunner.getContext()
+      const receipt = buildReplyExecutionReceipt({
+        state: 'failed',
+        roundProfile: turnExecutionContext?.replyExecutionProfile,
+        routeDecision: turnExecutionContext?.replyOrchestrationDecision,
+        defaultRoute: options.fastReply ? 'reuse' : 'orchestrate',
+        actualHasPersonalityModel: isPersonalityModelReply,
+        purePrompt: isPurePromptReply,
+        focusedAction: false,
+        messageId: failureMessageId,
+        promptLogId: outputPromptLogId,
+        completedStages: readCompletedExecutionStages(),
+        failureStage: failureStage || inferExecutionFailureStage(),
+        error
+      })
+      await createChatGenerationAttemptArtifactBySessionId(sessionId, {
+        attemptId: generationAttemptId,
+        artifactKind: 'reply_execution_receipt',
+        ...(receipt.messageId > 0 ? { messageId: receipt.messageId } : {}),
+        promptLogId: receipt.promptLogId,
+        payload: {
+          ...receipt.replyExecutionAudit,
+          executionReceipt: receipt
+        }
+      }).catch((artifactError) => console.error('保存回复失败执行回执失败:', artifactError))
+    }
+    const persistPersonalityModelFailureTrace = async (
+      error: unknown,
+      outputPromptLogId = '',
+      failureMessageId = 0,
+      failureStage = ''
+    ) => {
       if (!personalityModelReplyStarted || !generationAttemptId || !sessionId) return
       const basePayload = personalityTracePayload && typeof personalityTracePayload === 'object'
         ? { ...personalityTracePayload }
@@ -5228,6 +5758,17 @@ export function useChatSendPipeline({
         ? basePayload.orchestration as Record<string, unknown>
         : {}
       const reason = getErrorMessage(error)
+      const resolvedFailureStage = failureStage || inferExecutionFailureStage('personality_model_reply')
+      const completedStages = readCompletedExecutionStages()
+      const turnExecutionContext = chatTurnRunner.getContext()
+      const executionAudit = buildReplyExecutionAudit({
+        roundProfile: turnExecutionContext?.replyExecutionProfile,
+        routeDecision: turnExecutionContext?.replyOrchestrationDecision,
+        defaultRoute: options.fastReply ? 'reuse' : 'orchestrate',
+        actualHasPersonalityModel: true,
+        purePrompt: false,
+        focusedAction: false
+      })
       await createChatGenerationAttemptArtifactBySessionId(sessionId, {
         attemptId: generationAttemptId,
         artifactKind: 'personality_model_trace',
@@ -5235,6 +5776,7 @@ export function useChatSendPipeline({
         promptLogId: outputPromptLogId,
         payload: {
           ...basePayload,
+          ...executionAudit,
           speakerTargetId: String(basePayload.speakerTargetId || speakerTargetId || target),
           speakerName,
           state: 'failed',
@@ -5247,14 +5789,14 @@ export function useChatSendPipeline({
             toolCalls: Array.isArray(currentOrchestration.toolCalls) ? currentOrchestration.toolCalls : [],
             orchestrationSummary: String(currentOrchestration.orchestrationSummary || '人格模型回复链路在最终回复前中断。'),
             failure: {
-              stage: 'personality_model_reply',
+              stage: resolvedFailureStage,
               reason,
               detail: reason,
               impact: failureMessageId > 0
                 ? '最终角色模型调用失败；已保存一条可重试失败消息，正式角色正文未生成。'
                 : '最终回复未生成，聊天消息未写入。',
               ...(failureMessageId > 0 ? { failureMessageId } : {}),
-              chain: ['message_projection', 'reply_plan_orchestration', 'candidate_plan_generation', 'personality_reranker', 'final_reply_generation']
+              chain: completedStages
             }
           }
         }
@@ -5291,56 +5833,11 @@ export function useChatSendPipeline({
       roleAgentContextBlock = roleAgentContext.text
       roleAgentContextBundle = roleAgentContext.bundle
       if (options.fastReply) {
-        const planningMessages = buildTidiaoMessageWritingPlanMessages({
-          mode: 'fast_reply',
-          currentInput: text,
-          contextBlock: renderRoleReplyContext(roleAgentContextBundle),
-          taskInstruction: String(options.fastReplyPlanningHint || directPlan || `规划${speakerName}当前这一轮的自然回应。`).trim(),
-          speakerName
-        })
-        const planningOutput = await callAI(planningMessages, {
-          ...buildTaskModelAiOptions(readBrainAgentConfigFromList(settingStore.agentModelConfigs) as any, 'directorLoop', {
-            maxTokens: 700,
-            temperature: 0.2,
-            thinking: 'disabled'
-          }),
-          feature: 'agent',
-          logLabel: 'tidiao-fast-reply-plan',
-          usageLabel: `快速回复：提调规划 ${speakerName}`,
-          placeLabel: `会话：${getTargetName(target)}`,
-          placeType: target === speakerTargetId ? 'single' : 'group',
-          ...(abortSignal ? { signal: abortSignal } : {}),
-          onPromptPrepared: async ({ finalPrompt, promptBlocks }: {
-            messages: Array<{ role: ChatRole; content: string }>
-            finalPrompt: string
-            promptBlocks?: ChatPromptLogBlock[]
-            preparedAt: string
-          }) => {
-            try {
-              const log = sessionId ? await createChatPromptLogBySessionId(sessionId, {
-                speakerName: `提调 · ${speakerName}写作计划`,
-                targetId: speakerTargetId || target,
-                finalPrompt,
-                promptBlocks: promptBlocks || buildPromptBlocksFromPreparedMessages(planningMessages, 'fast-reply-writing-plan')
-              }) : await createChatPromptLog(target, {
-                speakerName: `提调 · ${speakerName}写作计划`,
-                targetId: speakerTargetId || target,
-                finalPrompt,
-                promptBlocks: promptBlocks || buildPromptBlocksFromPreparedMessages(planningMessages, 'fast-reply-writing-plan')
-              })
-              fastReplyPlanningPromptLogId = String(log.id || '')
-            } catch (error) {
-              console.error('记录快速回复提调写作计划提示词失败:', error)
-            }
-          }
-        })
-        assertPipelineCanContinue(runId, taskRunId)
-        const writingPlan = parseMessageWritingPlanOutput(
-          normalizeAiOutputText(stripAiThoughtContent(String(planningOutput || '')))
-        )
-        directPlan = writingPlan.content
-        directExpressionMix = writingPlan.expressionMix
-        directWordCountAdvice = writingPlan.wordCountAdvice
+        directPlan = String(
+          options.fastReplyPlanningHint
+          || directPlan
+          || `以${speakerName}的身份自然承接当前对话，只使用该角色明确知道或现场可观察的信息。`
+        ).trim()
       }
       const isPurePromptReply = shouldUsePurePromptReply()
       const isPersonalityModelReply = !isPurePromptReply && shouldUsePersonalityModelReply(speakerTargetId || target)
@@ -5349,20 +5846,6 @@ export function useChatSendPipeline({
       const isReplyWorkflowReply = !isPurePromptReply
       const replyWorkflowMode: ReplyWorkflowMode = isPersonalityModelReply ? 'personality_model' : 'normal_recall'
       personalityModelReplyStarted = isPersonalityModelReply
-      if (!isPurePromptReply && !isPersonalityModelReply) {
-        // 无模型兜底提示（用户 2026-07-06 拍板，取代旧「门禁跳过该角色」）：配置选了人格模型链路
-        // 但角色未上传 ONNX 模型时，resolveReplyPipelineMode 已把有效模式回退成普通召回；
-        // 这里只补一条可见提示，保证回退不静默。多人会话里只有无模型的角色回退，其余照常。
-        const personalityCharacter = resolveReplyTargetCharacter(speakerTargetId || target)
-        const configuredMode = resolveConfiguredReplyPipelineMode({
-          session: getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null,
-          character: personalityCharacter as Record<string, unknown> | null
-        })
-        if (configuredMode === 'personality_model') {
-          const fallbackName = speakerName || personalityCharacter?.name || '该角色'
-          toast(`${fallbackName}未上传人格模型，本轮已回退普通召回`, 'info')
-        }
-      }
       const recallBypass = resolveRecallBypassForSpeaker({
         speakerTargetId: speakerTargetId || target,
         speakerName,
@@ -5416,11 +5899,9 @@ export function useChatSendPipeline({
           // 批次4-投影 B：提调下发的投影态上下文（directorProjectionContext ON 且提调成功产出时非空），
           // 分镜据它替代独立「判情境上下文」fetch 的 compressedContext；缺省走原 compressedContext，零回归。
           downstreamProjectionContext: activeRoundDirector?.downstreamProjectionContext,
-          // 批B·人格模型直通道：非空即跳过编排轮+候选轮+ReRanker 评审三段，直填正文轮。
+          // 直通道：非空即跳过编排轮与模型候选生成；人格 profile 仍保留低成本直通策略评分。
           ...(directPlan ? {
-            directPlan,
-            directExpressionMix,
-            directWordCountAdvice
+            directPlan
           } : {}),
           onStep: emitProcessStep,
           onThought: emitProcessThought,
@@ -5637,13 +6118,14 @@ export function useChatSendPipeline({
         returnedText = await callFinalRoleModel()
       } catch (error) {
         if (!isPersonalityModelReply || isAbortError(error)) throw error
+        markReplySituationCheckpointFailure(error)
         const promptLogId = String(localMessageTargets.get(`${localMessageKey}:prompt-log`) || '')
         const failureContent = [
           '【最终角色模型调用失败】',
           '',
           `错误：${getErrorMessage(error)}`,
           '',
-          '本轮投影、召回、计划编排和 ReRanker 已经完成，最终提示词也已保存。',
+          '本轮在最终角色模型调用处中断；已完成到哪一步请以这条消息的执行审计为准。',
           '可以对这条角色消息使用“按原提示词重试”，只重放最后一次角色模型调用。'
         ].join('\n')
         const failureMessage: MessagePayload & Record<string, unknown> = {
@@ -5709,7 +6191,8 @@ export function useChatSendPipeline({
           })
         }
         failNormalMessageTaskRun(taskRunId, error)
-        await persistPersonalityModelFailureTrace(error, promptLogId, failureMessageId)
+        await persistReplyExecutionFailureReceipt(error, promptLogId, failureMessageId, 'final_reply_generation')
+        await persistPersonalityModelFailureTrace(error, promptLogId, failureMessageId, 'final_reply_generation')
         toast('最终角色模型调用失败，已保存为可重试角色消息', 'warning', 10000)
         return {
           assistantMessageIds: failureMessageId > 0 ? [failureMessageId] : [],
@@ -5762,7 +6245,8 @@ export function useChatSendPipeline({
           content: debugContent
         })
         await failSingleChatAttempt(emptyReplyError, promptLogId)
-        await persistPersonalityModelFailureTrace(emptyReplyError, promptLogId)
+        await persistReplyExecutionFailureReceipt(emptyReplyError, promptLogId, 0, 'final_reply_validation')
+        await persistPersonalityModelFailureTrace(emptyReplyError, promptLogId, 0, 'final_reply_validation')
         toast(`模型调用成功，但没有返回可保存的可见正文；已在聊天区输出诊断：${emptyReplyErrorKind}`, 'warning', 10000)
         return createEmptySingleChatRunResult()
       }
@@ -5818,6 +6302,8 @@ export function useChatSendPipeline({
           && visibleReply.length <= 50000
         if (!canRetryWithoutThought) {
           await failSingleChatAttempt(error, promptLogId)
+          await persistReplyExecutionFailureReceipt(error, promptLogId, 0, 'assistant_reply_persist')
+          await persistPersonalityModelFailureTrace(error, promptLogId, 0, 'assistant_reply_persist')
           toast(`回复已生成但保存失败: ${getErrorMessage(error)}`, 'error', 10000)
           localMessageTargets.delete(localMessageKey)
           localMessageTargets.delete(`${localMessageKey}:prompt-log`)
@@ -5872,17 +6358,6 @@ export function useChatSendPipeline({
           }
         } catch (error) {
           console.error('绑定提示词日志失败:', error)
-        }
-      }
-      if (fastReplyPlanningPromptLogId && typeof persistedId === 'number' && persistedId > 0) {
-        try {
-          if (sessionId) {
-            await bindChatPromptLogMessageBySessionId(sessionId, fastReplyPlanningPromptLogId, persistedId)
-          } else {
-            await bindChatPromptLogMessage(target, fastReplyPlanningPromptLogId, persistedId)
-          }
-        } catch (error) {
-          console.error('绑定快速回复提调写作计划提示词日志失败:', error)
         }
       }
       if (!isPurePromptReply && typeof persistedId === 'number' && persistedId > 0) {
@@ -5961,17 +6436,26 @@ export function useChatSendPipeline({
           outputPromptLogId
         })
         if (generationAttemptId) {
+          const turnExecutionContext = chatTurnRunner.getContext()
+          const executionAudit = buildReplyExecutionAudit({
+            roundProfile: turnExecutionContext?.replyExecutionProfile,
+            routeDecision: turnExecutionContext?.replyOrchestrationDecision,
+            defaultRoute: options.fastReply ? 'reuse' : 'orchestrate',
+            actualHasPersonalityModel: isPersonalityModelReply,
+            purePrompt: isPurePromptReply,
+            focusedAction: false
+          })
           // 过程轨真值分流：人格模型写专属 personality_model_trace（含 ReRanker 诊断门禁）；
           // 普通召回写通用 reply_workflow_trace（服务端按 processSummary 放行）；纯净回复只写 reply_message。
-          // 批B：direct 分支即使 isPersonalityModelReply（角色本有 ONNX 模型）也必须落 reply_workflow_trace——
-          // 服务端 workspaceChatAppService.ts 的 hasPersonalityRerankerDiagnostics 门禁只放行带 ReRanker 诊断的
-          // personality_model_trace，direct 分支没跑评审、没有诊断，落该 kind 会被静默过滤、过程轨消失。
+          // 稳定续话的 direct 人格分支同样真实执行了三候选 ReRanker，因此也必须进入人格专属审计；
+          // 服务端会用 executionPolicy + 真实候选/选中项识别这条低成本评分链，降级也保留失败原因。
           const artifactKind = personalityTracePayload
-            ? ((isPersonalityModelReply && !directPlan) ? 'personality_model_trace' : 'reply_workflow_trace')
+            ? (isPersonalityModelReply ? 'personality_model_trace' : 'reply_workflow_trace')
             : 'reply_message'
           const artifactPayload = personalityTracePayload
             ? {
               ...personalityTracePayload,
+              ...executionAudit,
               messageId: persistedId,
               promptLogId: outputPromptLogId,
               // 顶层精简过程轨摘要：纯展示步骤状态 + 用时，无技术字段；与 orchestration 并列，
@@ -6009,7 +6493,7 @@ export function useChatSendPipeline({
                 }
                 : {})
             }
-            : { messageId: persistedId }
+            : { ...executionAudit, messageId: persistedId }
           await createChatGenerationAttemptArtifactBySessionId(sessionId, {
             attemptId: generationAttemptId,
             artifactKind,
@@ -6110,6 +6594,7 @@ export function useChatSendPipeline({
       localMessageTargets.delete(localMessageKey)
       localMessageSessions.delete(localMessageKey)
       await failSingleChatAttempt(err, promptLogId)
+      await persistReplyExecutionFailureReceipt(err, promptLogId)
       await persistPersonalityModelFailureTrace(err, promptLogId)
       toast(`AI回复失败: ${getErrorMessage(err)}`, 'error', 10000)
       return createEmptySingleChatRunResult()
@@ -6424,7 +6909,10 @@ export function useChatSendPipeline({
                 speakerCharacterId: speakerTargetId,
                 insertAfterMessageId: persistedMessageId || anchorMessageId,
                 abortSignal: input.abortSignal
-              }).catch((flushError) => console.warn(`穿插旁白 flush 失败（${getTargetName(speakerTargetId)}）:`, flushError))
+              }).catch((flushError) => {
+                markReplySituationCheckpointFailure(flushError)
+                console.warn(`穿插旁白 flush 失败（${getTargetName(speakerTargetId)}）:`, flushError)
+              })
             },
             onAssistantContentComposed: ({ text }) => {
               prefetchRoundInterleavedNarration({
@@ -6772,7 +7260,7 @@ export function useChatSendPipeline({
             sessionId,
             // 请求发起轮的锚：供造册的大脑召回落池接缝用（buildDirectorRecallPoolSeam 要求 >0 入场券）。
             anchorMessageId,
-            characterOptions: candidates.map((c) => ({ id: c.characterId, name: c.name }))
+            characterOptions: buildTidiaoStatusScopeCharacterOptions(candidates, statusParticipantIdByCharacterId)
           })
           return null
         }
@@ -6985,11 +7473,6 @@ export function useChatSendPipeline({
       // 仅当解析出真实统筹剧本时才填 activeRoundDirector（供方向真注入 + 编排带一轮一条展示）；
       // 否则只返回顺序、保持 activeRoundDirector 为空 → 编排带回退 per-speaker 聚合、不注入假方向。
       if (script) {
-        // 批次 C·收尾写回本轮情境（供下一轮并进提调主判作承接锚）：判出 scenarioCode 才写、否则清旧锚不留误导。
-        //   提调失败/无剧本（script=null）与异常/取消路径不动缓存——保留上轮有效情境，偶发失败一轮不丢情境连续性。
-        saveSessionLastScenario(sessionId, script.scenarioCode
-          ? { code: String(script.scenarioCode), summary: String(script.situation || '').trim() || undefined }
-          : null, String(activePipelineInputMessageId || ''))
         const nameById = new Map(candidates.map((c) => [c.characterId, c.name]))
         // E2：捕获 loop 最终快照（决策流+并排分镜，含读楼层/读投影/取料工具条），种进第一条成员 trace 走新带。
         const directorStreamSnapshot = captureTidiaoDirectorStreamSnapshot(directorStreamRunId)
@@ -7197,6 +7680,20 @@ export function useChatSendPipeline({
 
   async function runGroupChat(target: string, userText: string, runId: number, abortSignal?: AbortSignal, options: { replay?: boolean; replanText?: string; carryOver?: TidiaoDirectorCarryOver | null } = {}) {
     const session = getChatStoreCurrentSession(chatStore) as any
+    const checkpointSessionId = activePipelineSessionId || getActiveSessionId(chatStore)
+    const checkpointAnchorMessageId = activePipelineInputMessageId > 0
+      ? activePipelineInputMessageId
+      : Number([...getCurrentMessageList(chatStore)].reverse().find((message: any) => message?.role === 'user')?.id || 0)
+    if (checkpointSessionId && checkpointAnchorMessageId > 0
+      && (activeReplySituationCheckpointLifecycle?.runId !== runId
+        || activeReplySituationCheckpointLifecycle.sessionId !== checkpointSessionId)) {
+      await hydrateSessionOrchestrationMaterials(checkpointSessionId)
+      startReplySituationCheckpointLifecycle({
+        runId,
+        sessionId: checkpointSessionId,
+        anchorMessageId: checkpointAnchorMessageId
+      })
+    }
     const sessionMembers = normalizeSessionParticipantMembers(session)
     const group = (charStore.groups || []).find((g) => g.id === target || `group_${g.id}` === target)
     const groupMembers = sessionMembers.length > 0
@@ -7205,6 +7702,7 @@ export function useChatSendPipeline({
       ? normalizeGroupMembers(group.members)
       : []
     if (groupMembers.length === 0) {
+      await ensureReplySituationCheckpointInvalidated()
       toast('会话成员为空', 'error')
       return
     }
@@ -7216,17 +7714,25 @@ export function useChatSendPipeline({
     safeCurrentStreamingSpeakerName.value = ''
     safeCurrentStreamingTargetId.value = ''
     safePlannedGroupSpeakers.value = []
+    let roundCompleted = false
     try {
       // 方案 B：提调「整轮前置统筹 pass」优先一次产出本轮完整剧本（情境/旁白安排/每角色方向/顺序），
       // 替换现役概率机制；点名/@ 已作为 forced 合进 cast，每角色方向真注入正文、编排带一轮一条展示。
       // 兜底退役（稳妥版）：统筹失败/空时用确定性 cast 兜底——forced 最前、其余候选按序全出场；
       // 既退役随机发言权、又不让群聊哑火（不靠统筹模型单点），此时无方向、编排带回退 per-speaker 聚合。
       // Batch 1·群聊带纠偏整轮重排：replay+replanText+carryOver 透传给统筹决策器，据纠偏重判情境、续在原带。
-      const castReplyOrder = await decideRoundDirector({
-        userText, groupMembers, abortSignal, targetId: target,
-        ...(String(options.replanText || '').trim() ? { replanText: String(options.replanText).trim() } : {}),
-        ...(options.carryOver ? { carryOver: options.carryOver } : {})
-      })
+      const castReplyOrder = await (async () => {
+        try {
+          return await decideRoundDirector({
+            userText, groupMembers, abortSignal, targetId: target,
+            ...(String(options.replanText || '').trim() ? { replanText: String(options.replanText).trim() } : {}),
+            ...(options.carryOver ? { carryOver: options.carryOver } : {})
+          })
+        } finally {
+          // tombstone 不能早于导演读取上一情境，否则会污染导演投影；但必须早于任何角色正文生成。
+          await ensureReplySituationCheckpointInvalidated()
+        }
+      })()
       assertPipelineCanContinue(runId)
       let finalReplyOrder = castReplyOrder
       if (!finalReplyOrder) {
@@ -7242,6 +7748,13 @@ export function useChatSendPipeline({
           buildDeterministicCastFallback(fallbackCandidateIds, fallbackForcedIds, mentionExcludedChars.value || [])
         )
       }
+
+      updateRoundReplyExecutionProfileForSelectedSpeakers({
+        targetId: target,
+        session,
+        group: true,
+        characterIds: finalReplyOrder.map((item) => String(item.characterId || '').trim()).filter(Boolean)
+      })
 
       safePlannedGroupSpeakers.value = resolvePlannedGroupSpeakers(finalReplyOrder)
 
@@ -7271,23 +7784,42 @@ export function useChatSendPipeline({
           userText,
           replyOrder: finalReplyOrder
         })
+      const expectedReplyCount = finalReplyOrder.filter((item) => String(item.characterId || '').trim()).length
+      if (expectedReplyCount === 0 || replyCount < expectedReplyCount) {
+        markReplySituationCheckpointFailure(`本轮角色正文落库不完整（${replyCount}/${expectedReplyCount}）`)
+      }
+      roundCompleted = true
       // 返回本轮成功回复条数：多人重试链路据此判断是否产出了新回复，缺少 return 会让重试一律被判失败。
       return replyCount
     } finally {
       // 叙事种子批次4·阶段二：无论全成功还是部分角色失败，都只读取此刻真正落库的助手/旁白消息。
       // 停止且零落库时 collect 为空，绝不会误触发；部分落库则据实际部分核对。
-      const factCommit = scheduleNarrativeFactCommit()
+      if (roundCompleted && activeRoundDirector?.roundDirectorNarration) {
+        try {
+          await activeRoundDirector.roundDirectorNarration.completion
+        } catch (error) {
+          markReplySituationCheckpointFailure(error)
+        }
+      }
+      const factCommit = scheduleNarrativeFactCommit({ throwOnError: roundCompleted })
       scheduleBackgroundWorldEvolution(factCommit)
-      if (isPipelineRunCurrent(runId)) {
-        setTyping(chatStore, false)
-        setCurrentMessageModel(chatStore, '')
-        streamingText.value = ''
-        safeCurrentStreamingSpeakerName.value = ''
-        safeCurrentStreamingTargetId.value = ''
-        safePlannedGroupSpeakers.value = []
-        mentionSelectedChars.value = []
-        await nextTick()
-        scrollToBottom()
+      try {
+        if (roundCompleted) {
+          await factCommit
+          await finalizeReplySituationCheckpoint({ runId })
+        }
+      } finally {
+        if (isPipelineRunCurrent(runId)) {
+          setTyping(chatStore, false)
+          setCurrentMessageModel(chatStore, '')
+          streamingText.value = ''
+          safeCurrentStreamingSpeakerName.value = ''
+          safeCurrentStreamingTargetId.value = ''
+          safePlannedGroupSpeakers.value = []
+          mentionSelectedChars.value = []
+          await nextTick()
+          scrollToBottom()
+        }
       }
     }
   }
@@ -7319,6 +7851,11 @@ export function useChatSendPipeline({
     try {
       await runGroupChat(target, userText, runId, normalTaskRun.controller?.signal, { replay: true })
     } catch (error) {
+      try {
+        await ensureReplySituationCheckpointInvalidated()
+      } catch (invalidateError) {
+        console.error('[reply-situation-checkpoint] 失败轮持久化失效未完成:', invalidateError)
+      }
       await finishGenerationAttempt({
         attemptId: activeGenerationAttemptId,
         sessionId: activePipelineSessionId,
@@ -7573,6 +8110,64 @@ export function useChatSendPipeline({
     let judgePromptLogId = ''
     let planningPromptLogId = ''
     let resolvedVisibility: FocusedActionVisibility = FOCUSED_ACTION_DEFAULT_VISIBILITY
+    let executionStage = 'focused_action_context'
+    const completedStages: string[] = []
+    const focusedGenerationAttemptId = await startGenerationAttempt({
+      sessionId: input.sessionId,
+      anchorMessageId: input.inputMessageId,
+      triggerType: retryingMessageId ? 'user_message_regenerate' : 'normal_send',
+      mode: 'clean',
+      targetId: input.targetId,
+      speakerName: '旁白',
+      ...(retryingMessageId ? { replacedMessageIds: [retryingMessageId] } : {})
+    })
+    activeGenerationAttemptId = focusedGenerationAttemptId
+    markActiveTurnGenerationAttempt(focusedGenerationAttemptId)
+    const persistExecutionReceipt = async (receiptInput: {
+      state: 'completed' | 'failed'
+      messageId?: number
+      error?: unknown
+    }) => {
+      if (!focusedGenerationAttemptId) return
+      const turnContext = chatTurnRunner.getContext()
+      const receipt = receiptInput.state === 'completed'
+        ? buildReplyExecutionReceipt({
+            state: 'completed',
+            roundProfile: turnContext?.replyExecutionProfile,
+            routeDecision: turnContext?.replyOrchestrationDecision,
+            defaultRoute: 'orchestrate',
+            actualHasPersonalityModel: false,
+            purePrompt: false,
+            focusedAction: true,
+            messageId: receiptInput.messageId,
+            promptLogId,
+            completedStages
+          })
+        : buildReplyExecutionReceipt({
+            state: 'failed',
+            roundProfile: turnContext?.replyExecutionProfile,
+            routeDecision: turnContext?.replyOrchestrationDecision,
+            defaultRoute: 'orchestrate',
+            actualHasPersonalityModel: false,
+            purePrompt: false,
+            focusedAction: true,
+            messageId: receiptInput.messageId,
+            promptLogId,
+            completedStages,
+            failureStage: executionStage,
+            error: receiptInput.error
+          })
+      await createChatGenerationAttemptArtifactBySessionId(input.sessionId, {
+        attemptId: focusedGenerationAttemptId,
+        artifactKind: 'reply_execution_receipt',
+        ...(receipt.messageId > 0 ? { messageId: receipt.messageId } : {}),
+        promptLogId: receipt.promptLogId,
+        payload: {
+          ...receipt.replyExecutionAudit,
+          executionReceipt: receipt
+        }
+      }).catch((error) => console.error('保存动作快链执行回执失败:', error))
+    }
     const buildPayload = (content: string): MessagePayload & Record<string, unknown> => ({
       role: 'assistant',
       messageKind: 'narration',
@@ -7607,8 +8202,10 @@ export function useChatSendPipeline({
         anchorMessageId: input.inputMessageId,
         userText: input.userText
       })
+      completedStages.push('focused_action_context')
       const compactContext = renderFocusedActionContext(context.bundle)
       const judgeMessages = buildFocusedActionJudgeMessages(input.userText, compactContext)
+      executionStage = 'focused_action_judge'
       const judgeOutput = await callAI(judgeMessages, {
         ...buildTaskModelAiOptions(readBrainAgentConfigFromList(settingStore.agentModelConfigs) as any, 'focusedActionJudge', {
           maxTokens: 220,
@@ -7635,7 +8232,8 @@ export function useChatSendPipeline({
               promptBlocks: promptBlocks || [
                 { role: 'system', title: '书童判断规则', content: judgeMessages[0].content },
                 { role: 'user', title: '精简现场与动作', content: judgeMessages[1].content }
-              ]
+              ],
+              logKind: 'internal_agent'
             })
             judgePromptLogId = String(log.id || '')
           } catch (error) {
@@ -7648,6 +8246,7 @@ export function useChatSendPipeline({
         normalizeAiOutputText(stripAiThoughtContent(String(judgeOutput || '')))
       )
       resolvedVisibility = decision.visibility
+      completedStages.push('focused_action_judge')
       const planningMessages = buildTidiaoMessageWritingPlanMessages({
         mode: 'focused_action',
         currentInput: input.userText,
@@ -7655,6 +8254,7 @@ export function useChatSendPipeline({
         taskInstruction: decision.instruction,
         focus: decision.focus
       })
+      executionStage = 'focused_action_plan'
       const planningOutput = await callAI(planningMessages, {
         ...buildTaskModelAiOptions(readBrainAgentConfigFromList(settingStore.agentModelConfigs) as any, 'directorLoop', {
           maxTokens: 700,
@@ -7678,7 +8278,8 @@ export function useChatSendPipeline({
               speakerName: '提调 · 动作写作计划',
               targetId: input.targetId,
               finalPrompt,
-              promptBlocks: promptBlocks || buildPromptBlocksFromPreparedMessages(planningMessages, 'focused-action-writing-plan')
+              promptBlocks: promptBlocks || buildPromptBlocksFromPreparedMessages(planningMessages, 'focused-action-writing-plan'),
+              logKind: 'internal_agent'
             })
             planningPromptLogId = String(log.id || '')
           } catch (error) {
@@ -7690,6 +8291,7 @@ export function useChatSendPipeline({
       const writingPlan = parseMessageWritingPlanOutput(
         normalizeAiOutputText(stripAiThoughtContent(String(planningOutput || '')))
       )
+      completedStages.push('focused_action_plan')
       const promptLibraryAssembly = await buildPersonalityPromptLibrarySystemAssembly({
         targetId: input.targetId,
         speakerTargetId: input.targetId,
@@ -7707,6 +8309,7 @@ export function useChatSendPipeline({
           ...buildPayload(''), _targetId: input.targetId, _sessionId: input.sessionId
         })
       }
+      executionStage = 'final_reply_generation'
       const returnedText = await callAIStream(
         messages,
         {
@@ -7766,6 +8369,8 @@ export function useChatSendPipeline({
       const parsed = parseEmbeddedMessageProjectionOutput(normalizeAiOutputText(returnedText || fullReply))
       const visibleText = cleanAiPrefix(parsed.visibleText)
       if (!hasVisibleAiReplyBody(visibleText)) throw new Error('动作输入的正式消息模型没有返回可显示正文')
+      completedStages.push('final_reply_generation')
+      executionStage = 'assistant_reply_persist'
       await chatStore.editMessage?.(input.targetId, input.inputMessageId, {
         focusedActionVisibility: resolvedVisibility,
         focused_action_visibility: resolvedVisibility
@@ -7795,6 +8400,7 @@ export function useChatSendPipeline({
         }) || 0)
       }
       if (!persistedId) throw new Error('动作输入旁白落库失败')
+      completedStages.push('assistant_reply_persist')
       const persistedMessage = { id: persistedId, ...payload, _targetId: input.targetId, _sessionId: input.sessionId }
       clearStreamingBubbleState(input.targetId)
       if (retryingMessageId) {
@@ -7805,6 +8411,15 @@ export function useChatSendPipeline({
       if (judgePromptLogId) await bindChatPromptLogMessageBySessionId(input.sessionId, judgePromptLogId, persistedId)
       if (planningPromptLogId) await bindChatPromptLogMessageBySessionId(input.sessionId, planningPromptLogId, persistedId)
       if (promptLogId) await bindChatPromptLogMessageBySessionId(input.sessionId, promptLogId, persistedId)
+      completedStages.push('prompt_log_binding')
+      await finishGenerationAttempt({
+        attemptId: focusedGenerationAttemptId,
+        sessionId: input.sessionId,
+        status: 'completed',
+        assistantMessageIds: [persistedId],
+        outputPromptLogId: promptLogId
+      })
+      await persistExecutionReceipt({ state: 'completed', messageId: persistedId })
       triggerAutoWriteAfterAssistantPersisted({
         sessionId: input.sessionId,
         targetId: input.targetId,
@@ -7816,8 +8431,23 @@ export function useChatSendPipeline({
       return persistedId
     } catch (error) {
       removeStreamingMessage(chatStore, input.sessionId || input.targetId, localMessageKey)
+      await finishGenerationAttempt({
+        attemptId: focusedGenerationAttemptId,
+        sessionId: input.sessionId,
+        status: 'failed',
+        assistantMessageIds: [],
+        outputPromptLogId: promptLogId,
+        error
+      })
+      await persistExecutionReceipt({
+        state: 'failed',
+        messageId: retryingMessageId,
+        error
+      })
+      failNormalMessageTaskRun(input.taskRunId, error)
       throw error
     } finally {
+      if (activeGenerationAttemptId === focusedGenerationAttemptId) activeGenerationAttemptId = ''
       setTyping(chatStore, false)
       setCurrentMessageModel(chatStore, '')
       streamingText.value = ''
@@ -7861,6 +8491,12 @@ export function useChatSendPipeline({
       taskRunId: normalTaskRun.id,
       inputKind: 'focused_action',
       replyMode: 'normal_recall',
+      replyExecutionProfile: resolveReplyExecutionProfile({
+        route: 'orchestrate',
+        hasPersonalityModel: false,
+        purePrompt: false,
+        focusedAction: true
+      }),
       abortSignal: normalTaskRun.controller?.signal
     })
     try {
@@ -7882,6 +8518,9 @@ export function useChatSendPipeline({
         restartExisting: true
       })
       return true
+    } catch (error) {
+      failNormalMessageTaskRun(normalTaskRun.id, error)
+      throw error
     } finally {
       completeNormalMessageTaskRun(normalTaskRun.id)
       if (isPipelineRunCurrent(runId, normalTaskRun.id)) resetActivePipelineState()
@@ -8053,11 +8692,29 @@ export function useChatSendPipeline({
     activePipelineTaskRunId = normalTaskRun.id
     try {
       const currentSession = getChatStoreCurrentSession(chatStore) as Record<string, unknown> | null
-      const sessionReplyMode = resolveSessionReplyPipelineMode(currentSession)
       const focusedActionInput = options.inputKind === 'focused_action'
-      const fastReplyInput = !focusedActionInput && sessionReplyMode === 'fast_reply'
+      // 快速不再是人工会话模式，而是「上一轮情境检查点能否继续复用」的自动结果。
+      // 首轮/变化轮/不确定轮直接完整提调；稳定续话只支付一次书童轻判，然后走现有直通正文链路。
+      const automaticReplyRoute = !focusedActionInput && !purePromptReply
+        ? await decideAutomaticReplyOrchestration({
+            sessionId,
+            userText: normalized,
+            attachments: roundAttachments,
+            abortSignal: normalTaskRun.controller?.signal
+          })
+        : null
+      const replyRouteDecision = automaticReplyRoute?.decision ?? null
       const isGroupChat = shouldUseGroupChatPipeline(target, currentSession)
-      const shouldUsePersonalityModel = shouldUsePersonalityModelReply(target)
+      const roundBackendState = resolveRoundReplyBackendState(target, currentSession, isGroupChat)
+      const shouldUsePersonalityModel = roundBackendState.hasPersonalityModel
+      const replyExecutionProfile = resolveReplyExecutionProfile({
+        route: replyRouteDecision?.route ?? 'orchestrate',
+        hasPersonalityModel: shouldUsePersonalityModel,
+        mixedBackends: roundBackendState.mixedBackends,
+        purePrompt: purePromptReply,
+        focusedAction: focusedActionInput
+      })
+      const fastReplyInput = replyExecutionProfile.orchestrationDepth === 'reuse'
       beginActiveChatTurn({
         runId,
         sessionId,
@@ -8065,6 +8722,8 @@ export function useChatSendPipeline({
         taskRunId: normalTaskRun.id,
         inputKind: focusedActionInput ? 'focused_action' : purePromptReply ? 'pure_prompt_reply' : 'plain_user_message',
         replyMode: fastReplyInput ? 'fast_reply' : purePromptReply ? 'pure_prompt' : shouldUsePersonalityModel ? 'personality_model' : 'normal_recall',
+        replyExecutionProfile,
+        ...(replyRouteDecision ? { replyOrchestrationDecision: replyRouteDecision } : {}),
         abortSignal: normalTaskRun.controller?.signal
       })
       const focusedActionGroupId = focusedActionInput
@@ -8080,6 +8739,14 @@ export function useChatSendPipeline({
           : undefined
       )
       markActiveTurnInputMessage(activePipelineInputMessageId)
+      if (!focusedActionInput) {
+        const checkpointLifecycle = startReplySituationCheckpointLifecycle({
+          runId,
+          sessionId,
+          anchorMessageId: activePipelineInputMessageId
+        })
+        if (fastReplyInput) await ensureReplySituationCheckpointInvalidated(checkpointLifecycle)
+      }
       // caption 补完回填收口：用局部变量拷贝 messageId（不是持续读 activePipelineInputMessageId）——
       // 它是模块级可变状态，用户可能在 caption 还没跑完时已经开始下一轮，届时会被新一轮覆盖，
       // 局部拷贝保证这次的 caption 回填永远只落到这条消息，不会串到后面的消息上。
@@ -8124,14 +8791,17 @@ export function useChatSendPipeline({
         return
       }
       if (fastReplyInput) {
+        let fellBackToFullOrchestration = false
         try {
+          fastReplyAttempt: {
           const forcedCharacterIds = (mentionSelectedChars.value || []).map((id) => String(id || '').trim()).filter(Boolean)
-          const projection = await fetchDirectorOrchestrationProjection({
-            sessionId,
-            userText: normalized,
-            anchorMessageId: activePipelineInputMessageId,
-            forcedCharacterIds
-          })
+          const projection = automaticReplyRoute?.directorProjection
+            ?? await fetchDirectorOrchestrationProjection({
+              sessionId,
+              userText: normalized,
+              anchorMessageId: activePipelineInputMessageId,
+              forcedCharacterIds
+            })
           const probabilitiesByCharacterId = Object.fromEntries(
             normalizeChatSessionCharacterParticipants(currentSession)
               .map((member: any) => [
@@ -8145,7 +8815,39 @@ export function useChatSendPipeline({
             probabilitiesByCharacterId,
             forcedCharacterIds
           })
-          if (!speakers.length) throw new Error('当前没有正式在场角色，快速回复不会从未知或离场角色中兜底抽取')
+          if (!speakers.length) {
+            // 轻判只回答“情境能否复用”，不替代正式在场性计算。如果二者不一致，
+            // 保留当前轮和 @ 选择，直接升级完整统筹，不从未知/离场角色中偷做兜底。
+            fellBackToFullOrchestration = true
+            const fallbackRouteDecision = replyRouteDecision
+              ? {
+                  ...replyRouteDecision,
+                  route: 'orchestrate' as const,
+                  reason: '情境可续接，但正式在场性计算没有选出回复者，已升级完整统筹',
+                  confidence: 1,
+                  reusedScenario: null
+                }
+              : undefined
+            chatTurnRunner.updateContext({
+              replyMode: shouldUsePersonalityModel ? 'personality_model' : 'normal_recall',
+              replyExecutionProfile: resolveReplyExecutionProfile({
+                route: 'orchestrate',
+                hasPersonalityModel: shouldUsePersonalityModel,
+                mixedBackends: roundBackendState.mixedBackends,
+                purePrompt: false,
+                focusedAction: false
+              }),
+              ...(fallbackRouteDecision ? { replyOrchestrationDecision: fallbackRouteDecision } : {})
+            })
+            console.info('情境续接命中但无正式在场回复者，已升级完整提调')
+            break fastReplyAttempt
+          }
+          updateRoundReplyExecutionProfileForSelectedSpeakers({
+            targetId: target,
+            session: currentSession,
+            group: isGroupChat,
+            characterIds: speakers.map((speaker) => speaker.characterId)
+          })
           safePlannedGroupSpeakers.value = speakers.map((speaker) => ({ id: speaker.characterId, name: speaker.displayName }))
           // 先把正式选出的首位角色露给消息流，再等用户消息投影和生成尝试登记；
           // 用户消息落库后不再出现一段“什么都没发生”的空白等待。
@@ -8185,15 +8887,29 @@ export function useChatSendPipeline({
               fastReply: true,
               suppressNarration: true
             })
+            if (!result.assistantMessageIds.length) {
+              markReplySituationCheckpointFailure(`${speaker.displayName} 的角色正文未成功落库`)
+            }
             insertAfterMessageId = Number(result.assistantMessageIds[result.assistantMessageIds.length - 1] || insertAfterMessageId)
             priorSpeakerNames.push(speaker.displayName)
           }
-          const inputMessageId = activePipelineInputMessageId
+          await finalizeReplySituationCheckpoint({
+            runId,
+            last: replyRouteDecision?.reusedScenario
+              ? {
+                  code: replyRouteDecision.reusedScenario.code,
+                  ...(replyRouteDecision.reusedScenario.label ? { label: replyRouteDecision.reusedScenario.label } : {}),
+                  ...(replyRouteDecision.reusedScenario.summary ? { summary: replyRouteDecision.reusedScenario.summary } : {})
+                }
+              : null
+          })
           resetActivePipelineState()
-          await schedulePostRoundOrchestration({ sessionId, inputMessageId, triggerKind: 'fast_reply' })
+          // reuse 只允许「同一情境、无事实/状态变化」的自然续话；用户与角色消息仍各自完成事实投影，
+          // 但不再为已确认检查点重复启动整轮轮后提调。下一轮若检测到变化，会自动回到完整统筹。
           return
+          }
         } finally {
-          if (activePipelineRunId === runId) {
+          if (!fellBackToFullOrchestration && activePipelineRunId === runId) {
             setTyping(chatStore, false)
             streamingText.value = ''
             safeCurrentStreamingSpeakerName.value = ''
@@ -8220,6 +8936,7 @@ export function useChatSendPipeline({
       activateRoundUsageContext(target)
       const mentionedSessionTemporaryCharacter = await resolveMentionedSessionTemporaryCharacterForReply(sessionId, normalized)
       if (mentionedSessionTemporaryCharacter) {
+        await ensureReplySituationCheckpointInvalidated()
         if (userProjectionPromise) await userProjectionPromise
         markActiveTurnTemporaryEntityNarration()
         await runSessionTemporaryCharacterNarrationBeforeReply({
@@ -8235,6 +8952,7 @@ export function useChatSendPipeline({
       }
       const sessionTemporaryCharacterResult = await resolveUnknownSessionTemporaryMentionBeforeReply(sessionId, normalized)
       if (sessionTemporaryCharacterResult.handled) {
+        await ensureReplySituationCheckpointInvalidated()
         if (sessionTemporaryCharacterResult.item) {
           if (userProjectionPromise) await userProjectionPromise
           markActiveTurnTemporaryEntityNarration()
@@ -8251,6 +8969,7 @@ export function useChatSendPipeline({
         return
       }
       if (!isPipelineRunCurrent(runId) || isStopRequested(chatStore)) {
+        await ensureReplySituationCheckpointInvalidated()
         resetActivePipelineState()
         return
       }
@@ -8264,6 +8983,7 @@ export function useChatSendPipeline({
         })
       }
       if (!isPipelineRunCurrent(runId) || isStopRequested(chatStore)) {
+        await ensureReplySituationCheckpointInvalidated()
         resetActivePipelineState()
         return
       }
@@ -8290,12 +9010,17 @@ export function useChatSendPipeline({
         //      （无导演带，与群聊统筹失败回退同语义）。
         // 统一聊天投影是提调/角色配方的必需输入；先等当前用户消息投影完成，避免 bundle 只看见上一轮。
         if (userProjectionPromise) await userProjectionPromise
-        await decideRoundDirector({
-          userText: normalized,
-          groupMembers: [{ characterId: target }],
-          targetId: target,
-          abortSignal: normalTaskRun.controller?.signal
-        })
+        try {
+          await decideRoundDirector({
+            userText: normalized,
+            groupMembers: [{ characterId: target }],
+            targetId: target,
+            abortSignal: normalTaskRun.controller?.signal
+          })
+        } finally {
+          // 完整轮先让导演读取真实上一情境；导演收束（含失败）后、角色正文开工前再持久化失效。
+          await ensureReplySituationCheckpointInvalidated()
+        }
         // 真机五验④（2026-07-05）：单聊角色子工作流失败先自动重试一次（5s 缓冲）；仍失败登记可重试单元后照旧上抛
         //（单聊只有一位发言者·轮 failed 语义不变），用户在提调框说「重试」即可由 retryFailedWorkflow 重跑。
         clearRoundRetryUnits(sessionId, activePipelineInputMessageId)
@@ -8336,6 +9061,9 @@ export function useChatSendPipeline({
           const singleLastAssistantId = Number(
             singleResult?.assistantMessageIds?.[singleResult.assistantMessageIds.length - 1] || 0
           )
+          if (!singleResult?.assistantMessageIds?.length) {
+            markReplySituationCheckpointFailure(`${getTargetName(target)} 的角色正文未成功落库`)
+          }
           const singleNarrationAnchor = singleLastAssistantId || activePipelineInputMessageId
           await flushRoundInterleavedNarration({
             targetId: target,
@@ -8353,6 +9081,13 @@ export function useChatSendPipeline({
             })
           }
           await settleRoundInterleavedNarration()
+          if (activeRoundDirector?.roundDirectorNarration) {
+            await activeRoundDirector.roundDirectorNarration.completion
+          }
+          const factCommit = scheduleNarrativeFactCommit({ throwOnError: true })
+          scheduleBackgroundWorldEvolution(factCommit)
+          await factCommit
+          await finalizeReplySituationCheckpoint({ runId })
         } catch (error) {
           if (!(isAbortError(error) || normalTaskRun.controller?.signal?.aborted || isStopRequested(chatStore) || !isPipelineRunCurrent(runId))) {
             registerRoundRetryUnit({
@@ -8374,6 +9109,11 @@ export function useChatSendPipeline({
         }
       }
     } catch (error) {
+      try {
+        await ensureReplySituationCheckpointInvalidated()
+      } catch (invalidateError) {
+        console.error('[reply-situation-checkpoint] 失败轮持久化失效未完成:', invalidateError)
+      }
       await finishGenerationAttempt({
         attemptId: activeGenerationAttemptId,
         sessionId,

@@ -1,4 +1,4 @@
-import { normalizeChatReplyPipelineMode, normalizeChatSessionReplyPipelineMode } from './chatReplyPipelineMode'
+import { normalizeChatReplyPipelineMode } from './chatReplyPipelineMode'
 import type {
   ChatTurnFeatureId,
   ChatTurnReplyMode,
@@ -164,8 +164,7 @@ export const FAST_REPLY_MODE_POLICY: ReplyModePolicy = {
     'assistant_reply_persist',
     'prompt_log_binding',
     'projection_trajectory_writeback',
-    'generation_attempt',
-    'post_round_orchestration'
+    'generation_attempt'
   ],
   disabledFeatures: [
     'group_speaker_plan',
@@ -173,6 +172,8 @@ export const FAST_REPLY_MODE_POLICY: ReplyModePolicy = {
     'personality_candidate_plan_tree',
     'personality_narration_subagent',
     'personality_reranker',
+    'narrative_seed_background_evolution',
+    'post_round_orchestration',
     'pure_prompt_reply',
     'session_temporary_entity_narration'
   ],
@@ -183,9 +184,9 @@ export const FAST_REPLY_MODE_POLICY: ReplyModePolicy = {
     suppressCurrentUserInputTemplate: false
   },
   notes: [
-    'Fast reply selects only formally present characters from the orchestration projection.',
-    'Each selected character uses the normal role context and directPlan path; no pre-reply director plan or review runs.',
-    'Persisted visible replies are followed by a durable post-round orchestration run.'
+    'Fast reply is the internal policy for an automatic same-scenario reuse decision; it is no longer a session setting.',
+    'It selects only formally present characters and escalates to full orchestration when none are available.',
+    'Each selected character uses the normal role context and deterministic direct-plan variants; no extra writing-plan model runs. A character with an installed personality model only scores those local variants, while normal recall takes the first direct plan. Per-message projection remains enabled and repeated full post-round orchestration is skipped.'
   ]
 }
 
@@ -599,7 +600,7 @@ export const CHAT_TURN_JUDGE_POLICIES: JudgePolicy[] = [
     canWriteTruth: true,
     truthWrites: ['chat_messages user input and focused_action narration'],
     failurePolicy: 'stop_turn',
-    enabledIn: { normal_recall: true, personality_model: true, fast_reply: true },
+    enabledIn: { normal_recall: true, personality_model: true, fast_reply: false },
     sourceRefs: ['src/app/focusedActionPrompt.ts', 'src/app/manualNarrationCommand.ts'],
     notes: ['One-shot input kind; it never permanently changes the session reply mode.']
   },
@@ -613,9 +614,9 @@ export const CHAT_TURN_JUDGE_POLICIES: JudgePolicy[] = [
     canWriteTruth: true,
     truthWrites: ['status panels', 'narrative seeds', 'curtain', 'presence and authorized world facts'],
     failurePolicy: 'continue_with_audit',
-    enabledIn: { normal_recall: true, personality_model: true, fast_reply: true },
+    enabledIn: { normal_recall: true, personality_model: true, fast_reply: false },
     sourceRefs: ['shared/postRoundOrchestration.ts', 'src/app/postRoundOrchestrationQueue.ts'],
-    notes: ['Runs only after visible messages persist; unresolved runs are retried before the next session context is read.']
+    notes: ['Runs after visible messages persist for changed/complex rounds; same-scenario reuse keeps per-message projection and skips this repeated full reconciliation.']
   }
 ]
 
@@ -624,10 +625,12 @@ const JUDGE_POLICY_BY_ID = new Map<ChatTurnFeatureId, JudgePolicy>(
 )
 
 export function normalizeChatTurnReplyMode(value: unknown): ChatTurnReplyMode {
-  if (String(value ?? '').trim() === 'session_temporary_entity_narration') {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (raw === 'session_temporary_entity_narration') {
     return 'session_temporary_entity_narration'
   }
-  if (normalizeChatSessionReplyPipelineMode(value) === 'fast_reply') return 'fast_reply'
+  // fast_reply 已从会话设置退役，但仍是自动续接轻判命中后的单轮内部策略。
+  if (raw === 'fast_reply' || raw === 'fast' || raw === 'quick_reply') return 'fast_reply'
   return normalizeChatReplyPipelineMode(value)
 }
 

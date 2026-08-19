@@ -1,22 +1,54 @@
 <template>
   <!-- 回复编排器「提示词树」共享编辑组件（2026-06-20 迁移）。
-       旧实现内联在 PersonalityModelOrchestrationAuditPanel.vue；本组件供本地编排诊断面板编辑。
+       旧实现内联在 PersonalityModelOrchestrationAuditPanel.vue；现由文档库“情境提示词”页承载编辑，审计面板只读复用。
        数据真值：全局回复编排器配置（system 基线），fetchOrchestratorConfig 读 / saveOrchestratorConfig 写。
        readonly：只保留查看（树结构 + 标签 + 启用态 + 本轮已读取/已调用标记），去掉所有编辑入口与弹窗。 -->
-  <div class="opt-root">
+  <div
+    class="opt-root"
+    :class="{
+      'opt-root--readonly': readonly,
+      'opt-root--external-tree': Boolean(treeTarget),
+      'opt-root--compact': compact,
+      'opt-root--detail-open': editor.open
+    }"
+  >
     <div v-if="!readonly && saveError" class="oc-error">{{ saveError }}</div>
     <div v-else-if="!readonly && configNotice" class="oc-notice">{{ configNotice }}</div>
 
-    <div v-if="loading" class="cp-empty">正在加载全局编排配置…</div>
-    <div v-else-if="config" class="ptree">
+    <Teleport
+      v-if="!treeTarget || treeTargetElement"
+      :to="treeTargetElement || 'body'"
+      :disabled="!treeTargetElement"
+    >
+    <div v-if="loading" class="cp-empty ptree-loading">正在加载全局编排配置…</div>
+    <div v-else-if="config" class="ptree" aria-label="情境提示词导航树">
+      <Teleport
+        v-if="!readonly && (!actionTarget || actionTargetElement)"
+        :to="actionTargetElement || 'body'"
+        :disabled="!actionTargetElement"
+      >
+      <div class="ptree-toolbar">
+        <button
+          type="button"
+          class="ptree-restore-btn"
+          data-testid="restore-orchestrator-defaults"
+          :disabled="saving"
+          title="恢复默认情境提示词"
+          @click="openRestoreDefaultConfirm"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
+          <span>恢复默认</span>
+        </button>
+      </div>
+      </Teleport>
       <!-- LANGHUAN.md（上游角色 / 世界总入口，只读） -->
-      <div class="tn" :class="{ interactive: !readonly }" :style="{ paddingLeft: '6px' }" @click="!readonly && openLanghuan()">
+      <div class="tn" :class="{ interactive: !readonly, active: isActiveNode('langhuan') }" :style="{ paddingLeft: '6px' }" @click="!readonly && openLanghuan()">
         <span class="tn-tog"><span class="tn-leafdot"></span></span>
         <svg class="tn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><line x1="10" y1="9" x2="8" y2="9" /></svg>
         <span class="tn-label">LANGHUAN.md</span>
       </div>
       <!-- 回复编排器总提示词 -->
-      <div class="tn" :class="{ interactive: !readonly }" :style="{ paddingLeft: '6px' }" @click="!readonly && openEditSystem()">
+      <div class="tn" :class="{ interactive: !readonly, active: isActiveNode('system') }" :style="{ paddingLeft: '6px' }" @click="!readonly && openEditSystem()">
         <span class="tn-tog"><span class="tn-leafdot"></span></span>
         <svg class="tn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>
         <span class="tn-label">回复编排器总提示词</span>
@@ -34,7 +66,7 @@
         <template v-for="s in config.scenarios" :key="s.code">
           <div
             class="tn"
-            :class="{ interactive: !readonly }"
+            :class="{ interactive: !readonly, active: isActiveNode('scenario', s.code) }"
             :style="{ paddingLeft: '21px' }"
             :title="readonly ? '' : '右键新建挂载提示词'"
             @click="!readonly && openEditScenario(s)"
@@ -57,7 +89,7 @@
             v-for="p in sortedMountedPrompts(s)"
             :key="`${s.code}_${p.id}`"
             class="tn tn-mounted"
-            :class="{ interactive: !readonly, muted: !p.enabled }"
+            :class="{ interactive: !readonly, muted: !p.enabled, active: isActiveNode('mountedPrompt', p.id) }"
             :style="{ paddingLeft: '38px' }"
             @click="!readonly && openEditMountedPrompt(s.code, p)"
           >
@@ -71,7 +103,7 @@
             </span>
           </div>
         </template>
-        <div v-if="!readonly" class="tn-add" :style="{ paddingLeft: '21px' }" @click="openNewScenario">
+        <div v-if="!readonly" class="tn-add" :class="{ active: isActiveNode('newScenario') }" :style="{ paddingLeft: '21px' }" @click="openNewScenario">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
           新建情境skill
         </div>
@@ -89,7 +121,7 @@
           v-for="t in config.tools"
           :key="`tooltn_${t.name}`"
           class="tn"
-          :class="{ interactive: !readonly }"
+          :class="{ interactive: !readonly, active: isActiveNode('tool', t.name) }"
           :style="{ paddingLeft: '21px' }"
           @click="!readonly && openViewTool(t)"
         >
@@ -101,167 +133,146 @@
         <div v-if="!config.tools.length" class="tn-empty" :style="{ paddingLeft: '21px' }">未注册工具</div>
       </template>
     </div>
-
-    <!-- 全局编排配置编辑弹窗（提示词树新建 / 编辑 / 删除）；仅可编辑模式渲染 -->
-    <AppModalShell
-      v-if="!readonly"
-      :open="editor.open && !isScenarioEditor"
-      size="sm"
-      :title="EDITOR_TITLES[editor.mode]"
-      :subtitle="editor.mode === 'langhuan' ? 'Agent 根宪法 · 只读' : editor.mode === 'tool' ? '渐进式工具注册表 · 只读' : '全局编排配置 · 影响未来所有回复'"
-      @close="closeEditor"
-    >
-      <template #title-icon>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></svg>
-      </template>
-
-      <!-- 弹窗被 AppModalShell teleport 到 body，需就地携带 --lh-* 别名块，否则 .oc-* 变量级联断裂 -->
-      <div class="opt-modal-fields">
-      <template v-if="editor.mode === 'system'">
-        <label class="oc-label">编排器总提示词</label>
-        <textarea v-model="editor.systemPrompt" class="oc-textarea oc-textarea--tall" spellcheck="false"></textarea>
-        <div class="oc-hint">情境清单会自动附在总提示词之后，无需在此手写各情境枚举。</div>
-      </template>
-
-      <template v-else-if="editor.mode === 'langhuan'">
-        <div class="oc-readonly-note">LANGHUAN.md 是所有运行时 Agent 的根宪法：它只放阶段边界、真值、工具失败和审计可见性等底层约束。它不属于编排配置，因此此处只读；情境规则和融合规则仍由各阶段提示词按需读取。</div>
-      </template>
-
-      <template v-else-if="editor.mode === 'tool'">
-        <div class="oc-readonly-note">渐进式工具注册表为只读展示：<b>brief</b> 注入编排器工具清单，<b>manual</b> 由编排器调 getToolManual 按需取回。当前不在此编辑。</div>
-        <div class="oc-field"><label class="oc-label">工具名</label><div class="oc-readonly mono">{{ editor.toolName }}<span class="tl-kind" :class="{ meta: editor.toolKind === 'meta' }">{{ editor.toolKind === 'meta' ? '元工具' : '执行工具' }}</span></div></div>
-        <div class="oc-field"><label class="oc-label">brief（简介）</label><div class="oc-readonly oc-readonly--wrap">{{ editor.toolBrief || '—' }}</div></div>
-        <div class="oc-field"><label class="oc-label">manual（精确格式 + 示例）</label><pre class="oc-pre">{{ editor.toolManual || '—' }}</pre></div>
-      </template>
-
-      <template v-else-if="editor.mode === 'mountedPrompt' || editor.mode === 'newMountedPrompt'">
-        <div class="oc-field">
-          <label class="oc-label">归属情境</label>
-          <div class="oc-readonly mono">{{ editor.scenarioCode }}</div>
-        </div>
-        <div class="oc-field">
-          <label class="oc-label">标题</label>
-          <input v-model="editor.mountedPromptTitle" class="oc-input" placeholder="如 喜悦文风示例" />
-        </div>
-        <div class="oc-field">
-          <label class="oc-label">描述（给提调看）</label>
-          <textarea v-model="editor.mountedPromptDescription" class="oc-textarea" spellcheck="false" placeholder="一句话说明这段挂载提示词是干什么的；提调读取该情境后先看描述判断要不要用，必要时再读原文。"></textarea>
-        </div>
-        <div class="oc-field">
-          <label class="oc-label">启用状态</label>
-          <select v-model="editor.mountedPromptEnabledText" class="oc-input">
-            <option value="enabled">启用</option>
-            <option value="disabled">停用</option>
-          </select>
-        </div>
-        <div class="oc-field">
-          <label class="oc-label">挂载提示词原文</label>
-          <textarea v-model="editor.mountedPromptContent" class="oc-textarea oc-textarea--tall" spellcheck="false" placeholder="这里写的原文会在该情境命中时直接注入最终角色消息提示词。"></textarea>
-        </div>
-      </template>
-
-      <div v-if="editor.error" class="oc-err">{{ editor.error }}</div>
-      </div>
-
-      <template #actions>
-        <template v-if="editor.mode === 'langhuan' || editor.mode === 'tool'">
-          <button type="button" class="btn btn-primary" @click="closeEditor">关闭</button>
-        </template>
-        <template v-else>
-          <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeEditor">取消</button>
-          <button type="button" class="btn btn-primary" :disabled="saving" @click="submitEditor">
-            {{ saving ? '保存中…' : (editor.mode === 'newScenario' || editor.mode === 'newMountedPrompt' ? '新建' : '保存') }}
-          </button>
-        </template>
-      </template>
-    </AppModalShell>
-
-    <!-- 情境skill 编辑 / 新建：设计稿大号两栏弹窗（代号弱化、名字可编辑、正文为主）；仅可编辑模式渲染 -->
-    <Teleport v-if="!readonly" to="body">
-      <div
-        v-if="editor.open && isScenarioEditor"
-        class="skill-overlay"
-        @pointerdown.capture="scenarioOverlayGuard.handleOverlayPointerDown"
-        @click.self="onScenarioOverlayClick"
-      >
-        <div class="skill-modal" role="dialog" aria-modal="true" :aria-label="EDITOR_TITLES[editor.mode]">
-          <div class="skill-head">
-            <span class="skill-brand">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="6" cy="6" r="2.4" /><circle cx="6" cy="18" r="2.4" /><circle cx="18" cy="12" r="2.4" />
-                <path d="M8.3 7.4 15.7 11M8.3 16.6 15.7 13" />
-              </svg>
-            </span>
-            <div class="skill-titles">
-              <div class="skill-title">{{ EDITOR_TITLES[editor.mode] }}</div>
-              <div class="skill-sub">全局编排配置 · 影响未来所有回复</div>
-            </div>
-            <button type="button" class="skill-x" aria-label="关闭" @click="closeEditor">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5 5 19" /></svg>
-            </button>
-          </div>
-
-          <div class="skill-body">
-            <!-- 左栏：代号（弱化）/ 名字（可编辑）/ 触发说明 -->
-            <div class="skill-meta scrollbar-thin">
-              <div class="field-block">
-                <template v-if="editor.mode === 'scenario'">
-                  <div class="code-line">
-                    <span class="clbl">情境代号</span>
-                    <span class="code-val">{{ editor.code }}</span>
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="skill-fl"><span class="lbl">情境代号</span><span class="hint">小写字母开头</span></div>
-                  <input v-model="editor.code" class="skill-input mono" placeholder="如 calm / anger" />
-                </template>
-
-                <div class="skill-fl fl-gap">
-                  <span class="lbl">情境名字</span><span class="hint">可编辑</span>
-                </div>
-                <input v-model="editor.label" class="skill-input" placeholder="如 平静" />
-              </div>
-
-              <div class="field-block">
-                <div class="skill-fl"><span class="lbl">情境触发说明</span><span class="hint">短，路由用</span></div>
-                <textarea v-model="editor.trigger" class="skill-ta trigger" spellcheck="false" placeholder="该情境的触发条件（短），注入编排器「可用情境清单」帮助判别本轮情境。"></textarea>
-              </div>
-            </div>
-
-            <!-- 右栏：情境正文为主，纵向铺满 -->
-            <div class="skill-main">
-              <div class="field-block grow">
-                <div class="skill-fl">
-                  <span class="lbl">情境正文</span>
-                  <span class="hint">自然语言，按需读取</span>
-                  <span class="count">共 {{ scenarioBodyCount }} 字</span>
-                </div>
-                <textarea v-model="editor.body" class="skill-ta body scrollbar-thin" spellcheck="false" placeholder="该情境的反应类别、强度档位与生成要求（自然语言）。编排器判定情境后调 readScenarioSkill 读取正文，据此发起计划工具。"></textarea>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="editor.error" class="skill-err">{{ editor.error }}</div>
-
-          <div class="skill-foot">
-            <button type="button" class="mbtn mbtn-secondary" :disabled="saving" @click="closeEditor">取消</button>
-            <button type="button" class="mbtn mbtn-primary" :disabled="saving" @click="submitEditor">
-              {{ saving ? '保存中…' : (editor.mode === 'newScenario' ? '新建' : '保存') }}
-            </button>
-          </div>
-
-          <div class="skill-toast" :class="{ show: scenarioToast }">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
-            已保存 · 将影响未来所有回复
-          </div>
-        </div>
-      </div>
     </Teleport>
+
+    <AppConfirmDialog
+      v-if="!readonly"
+      :open="restoreDefaultConfirmOpen"
+      title="恢复默认情境提示词"
+      message="将用项目默认 seed 覆盖当前总提示词、全部情境及挂载提示词，并恢复默认工具表。现有自定义内容无法自动找回。"
+      confirm-text="恢复默认"
+      tone="danger"
+      @cancel="closeRestoreDefaultConfirm"
+      @confirm="restoreDefaultConfig"
+    />
+
+    <!-- 文档库主从布局：左侧树只负责选中，所有详情与编辑都固定在右侧，不再弹窗。 -->
+    <section v-if="!readonly && editor.open" class="opt-detail" :aria-label="EDITOR_TITLES[editor.mode]">
+      <header class="skill-head">
+        <span class="skill-brand">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="6" cy="6" r="2.4" /><circle cx="6" cy="18" r="2.4" /><circle cx="18" cy="12" r="2.4" />
+            <path d="M8.3 7.4 15.7 11M8.3 16.6 15.7 13" />
+          </svg>
+        </span>
+        <div class="skill-titles">
+          <div class="skill-title">{{ EDITOR_TITLES[editor.mode] }}</div>
+          <div class="skill-sub">{{ editorSubtitle }}</div>
+        </div>
+        <button type="button" class="skill-x" aria-label="关闭详情" @click="closeEditor">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5 5 19" /></svg>
+        </button>
+      </header>
+
+      <div v-if="isScenarioEditor" class="skill-body">
+        <div class="skill-meta scrollbar-thin">
+          <div class="field-block">
+            <template v-if="editor.mode === 'scenario'">
+              <div class="code-line">
+                <span class="clbl">情境代号</span>
+                <span class="code-val">{{ editor.code }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="skill-fl"><span class="lbl">情境代号</span><span class="hint">小写字母开头</span></div>
+              <input v-model="editor.code" class="skill-input mono" placeholder="如 calm / anger" />
+            </template>
+
+            <div class="skill-fl fl-gap">
+              <span class="lbl">情境名字</span><span class="hint">可编辑</span>
+            </div>
+            <input v-model="editor.label" class="skill-input" placeholder="如 平静" />
+          </div>
+
+          <div class="field-block">
+            <div class="skill-fl"><span class="lbl">情境触发说明</span><span class="hint">短，路由用</span></div>
+            <textarea v-model="editor.trigger" class="skill-ta trigger" spellcheck="false" placeholder="该情境的触发条件（短），注入编排器「可用情境清单」帮助判别本轮情境。"></textarea>
+          </div>
+        </div>
+
+        <div class="skill-main">
+          <div class="field-block grow">
+            <div class="skill-fl">
+              <span class="lbl">情境正文</span>
+              <span class="hint">自然语言，按需读取</span>
+              <span class="count">共 {{ scenarioBodyCount }} 字</span>
+            </div>
+            <textarea v-model="editor.body" class="skill-ta body scrollbar-thin" spellcheck="false" placeholder="该情境的反应类别、强度档位与生成要求（自然语言）。编排器判定情境后调 readScenarioSkill 读取正文，据此发起计划工具。"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="opt-detail__body opt-modal-fields">
+        <template v-if="editor.mode === 'system'">
+          <label class="oc-label">编排器总提示词</label>
+          <textarea v-model="editor.systemPrompt" class="oc-textarea oc-textarea--tall" spellcheck="false"></textarea>
+          <div class="oc-hint">情境清单会自动附在总提示词之后，无需在此手写各情境枚举。</div>
+        </template>
+
+        <template v-else-if="editor.mode === 'langhuan'">
+          <div class="oc-readonly-note">LANGHUAN.md 是所有运行时 Agent 的根宪法：它只放阶段边界、真值、工具失败和审计可见性等底层约束。它不属于编排配置，因此此处只读；情境规则和融合规则仍由各阶段提示词按需读取。</div>
+        </template>
+
+        <template v-else-if="editor.mode === 'tool'">
+          <div class="oc-readonly-note">渐进式工具注册表为只读展示：<b>brief</b> 注入编排器工具清单，<b>manual</b> 由编排器调 getToolManual 按需取回。当前不在此编辑。</div>
+          <div class="oc-field"><label class="oc-label">工具名</label><div class="oc-readonly mono">{{ editor.toolName }}<span class="tl-kind" :class="{ meta: editor.toolKind === 'meta' }">{{ editor.toolKind === 'meta' ? '元工具' : '执行工具' }}</span></div></div>
+          <div class="oc-field"><label class="oc-label">brief（简介）</label><div class="oc-readonly oc-readonly--wrap">{{ editor.toolBrief || '—' }}</div></div>
+          <div class="oc-field"><label class="oc-label">manual（精确格式 + 示例）</label><pre class="oc-pre">{{ editor.toolManual || '—' }}</pre></div>
+        </template>
+
+        <template v-else-if="editor.mode === 'mountedPrompt' || editor.mode === 'newMountedPrompt'">
+          <div class="opt-detail__mounted-grid">
+            <div class="oc-field">
+              <label class="oc-label">归属情境</label>
+              <div class="oc-readonly mono">{{ editor.scenarioCode }}</div>
+            </div>
+            <div class="oc-field">
+              <label class="oc-label">启用状态</label>
+              <select v-model="editor.mountedPromptEnabledText" class="oc-input">
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+          </div>
+          <div class="oc-field">
+            <label class="oc-label">标题</label>
+            <input v-model="editor.mountedPromptTitle" class="oc-input" placeholder="如 喜悦文风示例" />
+          </div>
+          <div class="oc-field">
+            <label class="oc-label">描述（给提调看）</label>
+            <textarea v-model="editor.mountedPromptDescription" class="oc-textarea" spellcheck="false" placeholder="一句话说明这段挂载提示词是干什么的；提调读取该情境后先看描述判断要不要用，必要时再读原文。"></textarea>
+          </div>
+          <div class="oc-field opt-detail__grow-field">
+            <label class="oc-label">挂载提示词原文</label>
+            <textarea v-model="editor.mountedPromptContent" class="oc-textarea oc-textarea--tall" spellcheck="false" placeholder="这里写的原文会在该情境命中时直接注入最终角色消息提示词。"></textarea>
+          </div>
+        </template>
+      </div>
+
+      <div v-if="editor.error" :class="isScenarioEditor ? 'skill-err' : 'oc-err'">{{ editor.error }}</div>
+
+      <footer v-if="editor.mode !== 'langhuan' && editor.mode !== 'tool'" class="opt-detail__actions">
+        <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeEditor">取消</button>
+        <button type="button" class="btn btn-primary" :disabled="saving" @click="submitEditor">
+          {{ saving ? '保存中…' : (editor.mode === 'newScenario' || editor.mode === 'newMountedPrompt' ? '新建' : '保存') }}
+        </button>
+      </footer>
+
+      <div class="skill-toast" :class="{ show: scenarioToast }">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        已保存 · 将影响未来所有回复
+      </div>
+    </section>
+
+    <div v-else-if="!readonly" class="opt-detail opt-detail--empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+      <span>从左侧选择一项查看或编辑</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG,
   type ReplyPlanOrchestratorConfig,
@@ -269,8 +280,7 @@ import {
   type ReplyPlanScenarioMountedPrompt
 } from '../../app/personalityPlanOrchestrator'
 import { fetchOrchestratorConfig, saveOrchestratorConfig } from '../../repositories/orchestratorConfigRepository'
-import AppModalShell from './AppModalShell.vue'
-import { createOverlayDismissGuard } from '../../utils/overlayDismissGuard'
+import AppConfirmDialog from './AppConfirmDialog.vue'
 
 const props = withDefaults(defineProps<{
   /** 只读：树只保留查看，去掉所有编辑入口与弹窗（聊天编排审计侧栏用）。 */
@@ -279,10 +289,19 @@ const props = withDefaults(defineProps<{
   activeScenarioCode?: string
   /** 聊天专属视图标记：本轮已调用的 plan 工具名集合，命中工具节点显示「本轮已调用」圆点。 */
   usedToolNames?: Set<string> | null
+  /** 桌面文档库外置侧栏的 DOM 目标；有值时导航树 teleport 到该列，详情仍留在正文区。 */
+  treeTarget?: string
+  /** 桌面文档库侧栏标题行的 DOM 目标；有值时低频全局操作与标题同行。 */
+  actionTarget?: string
+  /** 移动端紧凑态：树与详情采用单页切换，不并排挤压。 */
+  compact?: boolean
 }>(), {
   readonly: false,
   activeScenarioCode: '',
-  usedToolNames: null
+  usedToolNames: null,
+  treeTarget: '',
+  actionTarget: '',
+  compact: false
 })
 
 const emit = defineEmits<{
@@ -297,7 +316,11 @@ const loading = ref(true)
 const saving = ref(false)
 const saveError = ref('')
 const configNotice = ref('')
+const restoreDefaultConfirmOpen = ref(false)
 let configNoticeTimer: ReturnType<typeof setTimeout> | null = null
+const treeTargetElement = ref<HTMLElement | null>(null)
+const actionTargetElement = ref<HTMLElement | null>(null)
+let portalTargetObserver: MutationObserver | null = null
 
 // 文件夹展开态（视图真值，本地）
 const promptGroupOpen = ref(true)
@@ -327,6 +350,11 @@ const editor = reactive({
 
 const isScenarioEditor = computed(() => editor.mode === 'scenario' || editor.mode === 'newScenario')
 const scenarioBodyCount = computed(() => editor.body.replace(/\s/g, '').length)
+const editorSubtitle = computed(() => {
+  if (editor.mode === 'langhuan') return 'Agent 根宪法 · 只读'
+  if (editor.mode === 'tool') return '渐进式工具注册表 · 只读'
+  return '全局编排配置 · 影响未来所有回复'
+})
 
 const scenarioToast = ref(false)
 let scenarioToastTimer: ReturnType<typeof setTimeout> | null = null
@@ -345,10 +373,13 @@ function showConfigNotice(message = '已保存') {
   }, 2200)
 }
 
-// 遮罩按下→抬起都落在遮罩本身才算关闭，避免在文本框内拖选误关
-const scenarioOverlayGuard = createOverlayDismissGuard()
-function onScenarioOverlayClick(event: MouseEvent) {
-  if (scenarioOverlayGuard.shouldDismissFromOverlayClick(event)) closeEditor()
+function openRestoreDefaultConfirm() {
+  if (props.readonly || saving.value) return
+  restoreDefaultConfirmOpen.value = true
+}
+
+function closeRestoreDefaultConfirm() {
+  restoreDefaultConfirmOpen.value = false
 }
 
 function onScenarioContextMenu(event: MouseEvent, code: string) {
@@ -365,6 +396,43 @@ const EDITOR_TITLES: Record<EditorMode, string> = {
   newMountedPrompt: '新建挂载提示词',
   langhuan: 'LANGHUAN.md',
   tool: '可调用工具'
+}
+
+function isActiveNode(kind: 'langhuan' | 'system' | 'scenario' | 'newScenario' | 'mountedPrompt' | 'tool', id = '') {
+  if (!editor.open) return false
+  if (kind === 'langhuan' || kind === 'system' || kind === 'newScenario') return editor.mode === kind
+  if (kind === 'scenario') {
+    return (editor.mode === 'scenario' || editor.mode === 'newMountedPrompt') && editor.scenarioCode === id
+  }
+  if (kind === 'mountedPrompt') return editor.mode === 'mountedPrompt' && editor.mountedPromptId === id
+  return editor.mode === 'tool' && editor.toolName === id
+}
+
+function syncPortalTargets() {
+  if (typeof document === 'undefined') return
+  treeTargetElement.value = props.treeTarget
+    ? document.querySelector<HTMLElement>(props.treeTarget)
+    : null
+  actionTargetElement.value = props.actionTarget
+    ? document.querySelector<HTMLElement>(props.actionTarget)
+    : null
+}
+
+function observePortalTargets() {
+  syncPortalTargets()
+  if (
+    (!props.treeTarget && !props.actionTarget)
+    || typeof document === 'undefined'
+    || typeof MutationObserver === 'undefined'
+  ) return
+  // 顶层工作区切换会销毁并重建侧栏挂载点。即使首次已找到目标，也必须继续监听；
+  // 否则 Teleport 会一直指向已经脱离 document 的旧节点，返回文档库后左侧树为空。
+  portalTargetObserver = new MutationObserver(() => {
+    const treeTargetStale = Boolean(props.treeTarget && !treeTargetElement.value?.isConnected)
+    const actionTargetStale = Boolean(props.actionTarget && !actionTargetElement.value?.isConnected)
+    if (treeTargetStale || actionTargetStale) syncPortalTargets()
+  })
+  portalTargetObserver.observe(document.body, { childList: true, subtree: true })
 }
 
 function createMountedPromptId(): string {
@@ -505,6 +573,18 @@ async function persistConfig(next: ReplyPlanOrchestratorConfig, onSuccess?: () =
   }
 }
 
+async function restoreDefaultConfig() {
+  if (props.readonly || saving.value) return
+  closeRestoreDefaultConfirm()
+  const defaults = cloneOrchestratorConfig(DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG)
+  await persistConfig(defaults, () => {
+    promptGroupOpen.value = true
+    toolGroupOpen.value = false
+    openEditSystem()
+    showConfigNotice('已恢复默认情境提示词')
+  })
+}
+
 async function deleteMountedPrompt(scenarioCode: string, promptId: string) {
   const current = config.value
   if (!current) return
@@ -512,7 +592,11 @@ async function deleteMountedPrompt(scenarioCode: string, promptId: string) {
   const scenario = next.scenarios.find((item) => item.code === scenarioCode)
   if (!scenario) return
   scenario.mountedPrompts = sortedMountedPrompts(scenario).filter((prompt) => prompt.id !== promptId)
-  await persistConfig(next, () => { showConfigNotice('挂载提示词已删除') })
+  const deletingSelected = editor.open && editor.mode === 'mountedPrompt' && editor.mountedPromptId === promptId
+  await persistConfig(next, () => {
+    if (deletingSelected) closeEditor()
+    showConfigNotice('挂载提示词已删除')
+  })
 }
 
 async function deleteScenario(code: string) {
@@ -525,7 +609,13 @@ async function deleteScenario(code: string) {
     saveError.value = '至少保留总提示词或一个情境，不能全部删除'
     return
   }
-  await persistConfig(next)
+  const deletingSelected = editor.open
+    && (editor.mode === 'scenario' || editor.mode === 'mountedPrompt' || editor.mode === 'newMountedPrompt')
+    && editor.scenarioCode === code
+  await persistConfig(next, () => {
+    if (deletingSelected) closeEditor()
+    showConfigNotice('情境已删除')
+  })
 }
 
 async function submitEditor() {
@@ -538,7 +628,7 @@ async function submitEditor() {
   if (editor.mode === 'system') {
     if (!editor.systemPrompt.trim()) { editor.error = '总提示词不能为空'; return }
     next.systemPrompt = editor.systemPrompt.trim()
-    await persistConfig(next, () => { editor.open = false })
+    await persistConfig(next, () => { showConfigNotice('总提示词已保存') })
     return
   } else if (editor.mode === 'scenario') {
     const scenario = next.scenarios.find((item) => item.code === editor.scenarioCode)
@@ -570,6 +660,7 @@ async function submitEditor() {
     if (!editor.mountedPromptContent.trim()) { editor.error = '挂载提示词正文不能为空'; return }
     const now = new Date().toISOString()
     const currentPrompts = sortedMountedPrompts(scenario)
+    let savedPromptId = editor.mountedPromptId
     if (editor.mode === 'mountedPrompt') {
       const target = currentPrompts.find((item) => item.id === editor.mountedPromptId)
       if (!target) { editor.error = '挂载提示词不存在'; return }
@@ -580,8 +671,9 @@ async function submitEditor() {
       target.updatedAt = now
     } else {
       const maxOrder = currentPrompts.reduce((max, prompt) => Math.max(max, Number(prompt.orderIndex) || 0), 2)
+      savedPromptId = createMountedPromptId()
       currentPrompts.push({
-        id: createMountedPromptId(),
+        id: savedPromptId,
         title: editor.mountedPromptTitle.trim(),
         content: editor.mountedPromptContent.trim(),
         description: editor.mountedPromptDescription.trim(),
@@ -593,7 +685,8 @@ async function submitEditor() {
     }
     scenario.mountedPrompts = currentPrompts
     await persistConfig(next, () => {
-      editor.open = false
+      editor.mode = 'mountedPrompt'
+      editor.mountedPromptId = savedPromptId
       showConfigNotice('挂载提示词已保存')
     })
     return
@@ -609,21 +702,36 @@ async function load() {
     config.value = cloneOrchestratorConfig(DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG)
   } finally {
     loading.value = false
-    if (config.value) emit('loaded', config.value)
+    if (config.value) {
+      emit('loaded', config.value)
+      if (props.treeTarget && !props.readonly && !editor.open) openEditSystem()
+    }
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  observePortalTargets()
+  void load()
+})
 
-// 父层需要时可手动重载（如后台在别处改了配置）
+onBeforeUnmount(() => {
+  portalTargetObserver?.disconnect()
+  portalTargetObserver = null
+  if (scenarioToastTimer) clearTimeout(scenarioToastTimer)
+  if (configNoticeTimer) clearTimeout(configNoticeTimer)
+})
+
+// 父层需要时可手动重载（如其它页面改了配置）
 defineExpose({ reload: load })
 </script>
 
 <style scoped>
-/* --lh-* 别名块：组件自带，使其脱离诊断面板根节点也能正常显色。
-   树渲染在 .opt-root 内；通用编辑弹窗被 teleport 到 body，故 .opt-modal-fields 同样就地定义。 */
+/* --lh-* 别名块：树可被 teleport 到文档库外置侧栏，因此树根也必须自带别名。 */
 .opt-root,
-.opt-modal-fields {
+.opt-modal-fields,
+.ptree,
+.ptree-loading,
+.ptree-toolbar {
   --lh-card: var(--morandi-card);
   --lh-surface: var(--morandi-surface);
   --lh-soft-bg: var(--morandi-soft-bg);
@@ -645,11 +753,106 @@ defineExpose({ reload: load })
   --lh-dur: 0.18s;
   --lh-ease: ease;
 }
-.opt-root { width: 100%; }
+.opt-root {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.opt-root:not(.opt-root--readonly) {
+  height: 100%;
+}
+.opt-root--external-tree {
+  display: flex;
+  flex-direction: column;
+}
+.opt-root--readonly {
+  display: block;
+  overflow: visible;
+}
+.opt-root--readonly > .ptree,
+.opt-root--readonly > .ptree-loading {
+  overflow: visible;
+  border-right: 0;
+  padding: 0;
+}
+.opt-root--compact {
+  display: block;
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+.opt-root--compact > .ptree,
+.opt-root--compact > .ptree-loading {
+  overflow: visible;
+  border-right: 0;
+  padding: 8px 4px 22px;
+}
+.opt-root--compact.opt-root--detail-open > .ptree,
+.opt-root--compact.opt-root--detail-open > .ptree-loading {
+  display: none;
+}
+.opt-root--compact .opt-detail {
+  min-height: calc(100vh - 190px);
+}
+.opt-root > .ptree,
+.opt-root > .ptree-loading {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--lh-border-line);
+  padding: 14px 10px 20px;
+}
+:global(.doc-scenario-prompt-tree-host .ptree),
+:global(.doc-scenario-prompt-tree-host .ptree-loading) {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 0 0 18px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--morandi-text-light) 28%, transparent) transparent;
+}
 .ptree { font-size: 0.8rem; user-select: none; }
+.ptree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 4px 6px;
+  padding: 0 0 7px;
+  border-bottom: 1px solid var(--lh-border-line);
+}
+:global(.doc-scenario-prompt-actions-host .ptree-toolbar) {
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.ptree-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--lh-text-muted);
+  font: inherit;
+  font-size: 0.73rem;
+  cursor: pointer;
+  transition: color var(--lh-dur-fast), background var(--lh-dur-fast);
+}
+.ptree-restore-btn svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.ptree-restore-btn:hover:not(:disabled) { color: var(--lh-text); background: var(--lh-hover); }
+.ptree-restore-btn:focus-visible { outline: 2px solid color-mix(in srgb, var(--lh-accent) 34%, transparent); outline-offset: 1px; }
+.ptree-restore-btn:disabled { opacity: 0.48; cursor: default; }
 .tn { display: flex; align-items: center; gap: 6px; height: 28px; border-radius: 6px; position: relative; color: var(--lh-text-light); padding: 0 5px 0 6px; }
 .tn.interactive { cursor: pointer; }
 .tn.interactive:hover { background: var(--lh-hover); }
+.tn.active { background: color-mix(in srgb, var(--lh-accent) 12%, transparent); color: var(--lh-text); }
 .tn.muted { opacity: 0.58; }
 .tn-mounted { height: 24px; font-size: 0.76rem; }
 .tn-mounted::before { content: ''; position: absolute; left: 28px; top: -4px; bottom: -4px; width: 1px; background: color-mix(in srgb, var(--lh-border-line) 76%, transparent); }
@@ -657,7 +860,7 @@ defineExpose({ reload: load })
 .tn-tog { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tn-leafdot { width: 3px; height: 3px; border-radius: 50%; background: var(--lh-text-faint); }
 .tn-ic { width: 13px; height: 13px; color: var(--lh-text-muted); flex-shrink: 0; }
-.tn-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tn-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tn-sub { color: var(--lh-text-muted); margin-left: 6px; font-size: 0.72rem; font-weight: 400; }
 .tn-read { width: 5px; height: 5px; border-radius: 50%; background: var(--lh-accent); flex-shrink: 0; margin-left: 4px; }
 .tn-chev { width: 12px; height: 12px; color: var(--lh-text-faint); transition: transform var(--lh-dur-fast); cursor: pointer; }
@@ -671,17 +874,18 @@ defineExpose({ reload: load })
 .tn-add { display: flex; align-items: center; gap: 6px; height: 26px; font-size: 0.74rem; color: var(--lh-text-muted); cursor: pointer; border-radius: 6px; }
 .tn-add svg { width: 12px; height: 12px; }
 .tn-add:hover { background: var(--lh-hover); color: var(--lh-accent); }
+.tn-add.active { background: color-mix(in srgb, var(--lh-accent) 12%, transparent); color: var(--lh-accent); }
 .tn-empty { display: flex; align-items: center; height: 24px; font-size: 0.72rem; color: var(--lh-text-faint); }
 
-.oc-error { padding: 8px 10px; margin-bottom: 10px; border: 1px solid rgba(192, 102, 90, 0.32); background: rgba(192, 102, 90, 0.06); border-radius: var(--lh-radius-md); font-size: 0.72rem; color: var(--lh-danger); }
-.oc-notice { padding: 7px 10px; margin-bottom: 10px; border: 1px solid rgba(143, 170, 152, 0.34); background: rgba(143, 170, 152, 0.08); border-radius: var(--lh-radius-md); font-size: 0.72rem; color: #556b59; }
+.oc-error { position: absolute; z-index: 2; top: 8px; right: 12px; padding: 8px 10px; border: 1px solid rgba(192, 102, 90, 0.32); background: color-mix(in srgb, var(--morandi-bg) 94%, var(--lh-danger)); border-radius: var(--lh-radius-md); font-size: 0.72rem; color: var(--lh-danger); }
+.oc-notice { position: absolute; z-index: 2; top: 8px; right: 12px; padding: 7px 10px; border: 1px solid rgba(143, 170, 152, 0.34); background: color-mix(in srgb, var(--morandi-bg) 94%, var(--lh-accent)); border-radius: var(--lh-radius-md); font-size: 0.72rem; color: #556b59; }
 .oc-field { margin-bottom: 12px; }
 .oc-field:last-child { margin-bottom: 0; }
 .oc-label { display: block; font-size: 0.78rem; font-weight: 500; color: var(--lh-text); margin-bottom: 5px; }
 .oc-input { width: 100%; box-sizing: border-box; border: 1px solid var(--lh-border); border-radius: var(--lh-radius-md); padding: 8px 11px; font: inherit; font-size: 0.82rem; color: var(--lh-text); background: var(--lh-card); }
 .oc-input:focus { outline: none; border-color: var(--lh-accent); }
 .oc-textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--lh-border); border-radius: var(--lh-radius-md); padding: 9px 11px; font-family: var(--lh-font-mono); font-size: 0.78rem; line-height: 1.6; color: var(--lh-text); background: var(--lh-card); min-height: 110px; resize: vertical; white-space: pre-wrap; }
-.oc-textarea--tall { min-height: 220px; }
+.oc-textarea--tall { min-height: 260px; }
 .oc-textarea:focus { outline: none; border-color: var(--lh-accent); }
 .oc-readonly { font-family: var(--lh-font-mono); font-size: 0.78rem; color: var(--lh-text-light); padding: 7px 11px; background: var(--lh-soft-bg-strong); border-radius: var(--lh-radius-md); display: flex; align-items: center; gap: 8px; }
 .oc-readonly--wrap { display: block; font-family: inherit; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
@@ -694,82 +898,44 @@ defineExpose({ reload: load })
 .tl-kind.meta { color: var(--lh-accent); }
 .cp-empty { font-size: 0.78rem; color: var(--lh-text-muted); padding: 8px 2px; line-height: 1.55; }
 
-/* ============================================================
-   情境skill 编辑弹窗（设计稿大号两栏 · 高保真）
-   弹窗 Teleport 到 body，--lh-* 别名必须就地定义在弹窗根节点上。
-   ============================================================ */
-.skill-overlay {
-  --lh-modal-bg: #f3f2ef;
-  --lh-accent: #5c8a5c;
-  --lh-teal: #525e43;
-  --lh-text: #333333;
-  --lh-text-light: #666666;
-  --lh-text-muted: #999999;
-  --lh-text-faint: #b6b0a7;
-  --lh-border: #e0e0e0;
-  --lh-border-line: #e5e5e5;
-  --lh-danger: #c0665a;
-  --lh-input-bg: #fff;
-  --lh-secondary-bg: #efe5d8;
-  --lh-secondary-border: #b69f86;
-  --lh-secondary-text: #4f4034;
-  --lh-secondary-hover: #e4d6c4;
-  --lh-radius-md: 8px;
-  --lh-radius-modal: 22px;
-  --lh-shadow-modal: 0 22px 56px rgba(72, 58, 47, 0.12);
-  --lh-shadow-toast: 0 16px 34px rgba(42, 47, 40, 0.24);
-  --lh-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --lh-font-cjk: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", -apple-system, sans-serif;
-  --lh-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --lh-dur: 0.18s;
-  --lh-dur-fast: 0.15s;
-  --lh-ease: ease;
-
-  position: fixed;
-  inset: 0;
-  z-index: 13000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(72, 68, 63, 0.18);
-  backdrop-filter: blur(6px);
-}
-
-/* 本弹窗设计稿走独立局部变量（不接全局 morandi token），夜间在此整体改写别名值即可级联生效。 */
-:global([data-theme="dark"] .skill-overlay){
-  --lh-modal-bg: var(--morandi-card);
+/* 右侧详情区：与页面共面，不使用遮罩、浮层或第二套弹窗材质。 */
+.opt-detail {
+  --lh-accent: var(--morandi-accent);
+  --lh-teal: var(--morandi-primary);
   --lh-text: var(--morandi-text);
   --lh-text-light: var(--morandi-text-light);
-  --lh-text-muted: var(--morandi-text-light);
-  --lh-text-faint: var(--morandi-text-light);
+  --lh-text-muted: color-mix(in srgb, var(--morandi-text-light) 76%, transparent);
+  --lh-text-faint: color-mix(in srgb, var(--morandi-text-light) 54%, transparent);
   --lh-border: var(--morandi-border);
   --lh-border-line: var(--morandi-border);
-  --lh-input-bg: var(--langhuan-dialog-input-bg);
-  --lh-secondary-bg: var(--morandi-soft-bg-strong);
-  --lh-secondary-border: var(--morandi-border);
-  --lh-secondary-text: var(--morandi-text);
-  --lh-secondary-hover: var(--morandi-hover);
-}
+  --lh-danger: var(--morandi-danger);
+  --lh-input-bg: var(--morandi-card);
+  --lh-shadow-toast: 0 12px 28px rgba(42, 47, 40, 0.18);
+  --lh-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --lh-font-cjk: "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", -apple-system, sans-serif;
 
-.skill-modal {
-  width: min(1000px, 94%);
-  height: min(700px, 90%);
-  background: var(--lh-modal-bg);
-  border: 1px solid var(--lh-border-line);
-  border-radius: var(--lh-radius-modal);
-  box-shadow: var(--lh-shadow-modal);
+  position: relative;
   display: flex;
+  min-width: 0;
+  min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  position: relative;
+  background: var(--morandi-bg);
   color: var(--lh-text);
   font-family: var(--lh-font-ui);
-  animation: skill-modal-in var(--lh-dur) var(--lh-ease);
 }
-@keyframes skill-modal-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.99); }
-  to { opacity: 1; transform: none; }
+
+.opt-detail--empty {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--morandi-text-light);
+  font-size: 0.82rem;
+}
+.opt-detail--empty svg {
+  width: 28px;
+  height: 28px;
+  color: color-mix(in srgb, var(--morandi-text-light) 58%, transparent);
 }
 
 .skill-head {
@@ -841,20 +1007,55 @@ defineExpose({ reload: load })
   border-radius: var(--lh-radius-md); font-size: 0.78rem; color: var(--lh-danger);
 }
 
-.skill-foot {
+.opt-detail__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  padding: 22px 24px 12px;
+}
+.opt-detail__body > .oc-textarea--tall {
+  flex: 1 1 auto;
+  min-height: 280px;
+  resize: none;
+}
+.opt-detail__mounted-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  gap: 14px;
+}
+.opt-detail__grow-field {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 240px;
+  flex-direction: column;
+}
+.opt-detail__grow-field .oc-textarea {
+  flex: 1 1 auto;
+  resize: none;
+}
+
+.opt-detail__actions {
   display: flex; justify-content: flex-end; gap: 10px;
   padding: 14px 22px; border-top: 1px solid var(--lh-border-line);
 }
-.skill-foot .mbtn {
+.opt-detail__actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   min-width: 96px; height: 38px; border-radius: 12px;
+  padding: 0 18px;
+  line-height: 1;
   font-size: 0.9rem; font-weight: 600; cursor: pointer; font-family: var(--lh-font-ui);
   transition: background var(--lh-dur-fast), border-color var(--lh-dur-fast);
 }
-.skill-foot .mbtn:disabled { opacity: 0.55; cursor: default; }
-.mbtn-secondary { border: 1px solid var(--lh-secondary-border); background: var(--lh-secondary-bg); color: var(--lh-secondary-text); }
-.mbtn-secondary:hover:not(:disabled) { background: var(--lh-secondary-hover); }
-.mbtn-primary { border: 1px solid var(--lh-teal); background: var(--lh-teal); color: #fff; }
-.mbtn-primary:hover:not(:disabled) { background: #44503a; border-color: #44503a; }
+.opt-detail__actions .btn:disabled { opacity: 0.55; cursor: default; }
+.opt-detail__actions .btn-secondary { border: 1px solid var(--morandi-border); background: var(--morandi-soft-bg-strong); color: var(--morandi-text); }
+.opt-detail__actions .btn-secondary:hover:not(:disabled) { background: var(--morandi-hover); }
+.opt-detail__actions .btn-primary { border: 1px solid var(--morandi-primary); background: var(--morandi-primary); color: #fff; }
+.opt-detail__actions .btn-primary:hover:not(:disabled) { filter: brightness(0.94); }
 
 /* 保存反馈 toast */
 .skill-toast {
@@ -871,12 +1072,13 @@ defineExpose({ reload: load })
 .skill-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .skill-toast svg { width: 15px; height: 15px; stroke-width: 2; color: var(--lh-accent); }
 
-.skill-modal .scrollbar-thin::-webkit-scrollbar { width: 6px; }
-.skill-modal .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--lh-border-line); border-radius: 3px; }
-.skill-modal .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.opt-detail .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.opt-detail .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--lh-border-line); border-radius: 3px; }
+.opt-detail .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 720px) {
-  .skill-modal { width: 94%; height: 88%; }
   .skill-body { grid-template-columns: 1fr; }
+  .skill-meta { border-right: none; border-bottom: 1px solid var(--lh-border-line); }
+  .opt-detail__mounted-grid { grid-template-columns: 1fr; gap: 0; }
 }
 </style>

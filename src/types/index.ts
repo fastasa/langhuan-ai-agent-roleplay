@@ -772,6 +772,10 @@ export interface ChatSession {
   created_at?: string
   // 数据库字段（下划线风格）
   loaded_summary_ids: string | string[]
+  /** 滚动会话记忆已折叠到的最高消息 id；与 last_summary_time 的时间语义分离。 */
+  context_summary_message_id?: number
+  context_summary?: string
+  last_summary_time?: string
   caps_residue_state_json?: string
   virtual_scene_name?: string
   virtual_scene_desc?: string
@@ -808,6 +812,9 @@ export interface ChatSession {
   conversationAvatarPath?: string
   conversationEmoji?: string
   loadedSummaryIds?: string | string[]
+  contextSummaryMessageId?: number
+  contextSummary?: string
+  lastSummaryTime?: string
   capsResidueState?: Record<string, unknown>
   capsResidueStateJson?: string
   virtualSceneName?: string
@@ -1048,7 +1055,7 @@ export type RecallIntentSnapshotMode = 'rules' | 'smart'
 export type WriteBackAuditLogLevel = 'summary' | 'standard' | 'debug'
 // 文本槽四值=书童 fast（最快最省·格式化/小判断）/校书 balanced（均衡·默认主力）/
 // 执笔 message（角色消息与旁白正文专用）/掌阁 smart（最聪明最贵·创作与难题）。第五槽「编目」=嵌入向量，
-// 走 embeddingPresetId 独立链路（服务端管理预设·与文本槽不同源），
+// 走 embeddingPresetId/embeddingModel/embeddingDimensions 独立链路（本地配置·与文本槽不同源），
 // 不进本枚举——嵌入不经 buildModelUsageAiOptions 文本调用链，塞进来只会造出永远不该被调用的假档。
 // 旧九槽 id（roleMessage/narrationMessage/quickJudge1/quickJudge2/balanced/orchestration/highVolume/highIntelligence/xingyi）
 // 由 modelUsageConfig.normalizeModelUsageConfigs 读侧迁移映射兼容，库内旧字段不动、天然可回退。
@@ -1067,6 +1074,8 @@ export interface ModelUsageConfig {
   temperature: number
   maxTokens: number
   thinking: ModelThinkingMode
+  /** 空串跟随模型默认；Codex/Claude 等把努力程度作为独立参数的渠道使用。 */
+  effort: ModelReasoningEffort
   /** 空串跟随渠道默认；fast 只由模型目录明确声明支持时开放。 */
   serviceTier: ModelServiceTier
 }
@@ -1084,6 +1093,8 @@ export interface AgentModelConfig {
   fallbackRecallModel?: string
   fallbackRecallMaxTokens?: number
   embeddingPresetId?: string
+  embeddingModel?: string
+  embeddingDimensions?: number
   narrationQuickJudgePresetName?: string
   narrationQuickJudgeModel?: string
   narrativeBeatPresetName?: string

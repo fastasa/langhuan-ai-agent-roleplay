@@ -91,6 +91,7 @@ import { saveAvatarDataUri as defaultSaveAvatarDataUri } from '../../repositorie
 import { getActiveUserId } from '../../localWorkspace.js'
 import { characterSnapshotService as defaultCharacterSnapshotService } from '../character/characterSnapshotService.js'
 import { createAgentContextProjectionService } from '../agentContext/agentContextProjectionService.js'
+import { createVersionedAgentContextCache } from '../agentContext/versionedAgentContextCache.js'
 import { orchestrationPresenceAppService as defaultOrchestrationPresenceAppService } from '../orchestration/orchestrationPresenceAppService.js'
 import { orchestrationWorkspaceProjectionService as defaultOrchestrationWorkspaceProjectionService } from '../orchestration/orchestrationWorkspaceProjectionService.js'
 import { getActiveWorkspaceId } from '../../localWorkspace.js'
@@ -389,6 +390,8 @@ function collectStatusPanelRefIds(fields: Array<Record<string, any>>, values: Re
 
 export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
   const saveAvatarDataUri = deps.saveAvatarDataUri ?? defaultSaveAvatarDataUri
+  // 跨请求复用；key 同时包含配方版本、视角/锚点和完整来源修订摘要，来源变化即自然失效。
+  const agentContextProjectionCache = createVersionedAgentContextCache({ maxEntries: 256 })
 
   function persistSessionAvatar(sessionId: string, rawValue: unknown): string {
     const raw = String(rawValue ?? '').trim()
@@ -1359,38 +1362,61 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
     return 'chat'
   }
 
+  function isProjectionPromptLogKind(value: unknown) {
+    return ['message_projection', 'manual_projection'].includes(String(value || '').trim())
+  }
+
   function buildPromptLogIndexMeta(sessionId: string) {
     const rows = typeof chatRepository.listPromptLogIndexRowsBySessionId === 'function'
       ? chatRepository.listPromptLogIndexRowsBySessionId(sessionId)
       : []
-    const totalCount = rows.length
+    const messageRows: Array<{ messageId: string; messageKind: string }> = []
+    const seenMessageIds = new Set<string>()
+    rows.forEach((row: Record<string, any>) => {
+      const messageId = String(row.assistantMessageId || row.assistant_message_id || '').trim()
+      if (!messageId || seenMessageIds.has(messageId)) return
+      seenMessageIds.add(messageId)
+      messageRows.push({
+        messageId,
+        messageKind: normalizePromptLogMessageKind(row.messageKind ?? row.message_kind)
+      })
+    })
+    const totalCount = messageRows.length
     const kindTotals: Record<string, number> = { chat: 0, narration: 0, narration_debug: 0, caps_reply: 0 }
     const kindSeen: Record<string, number> = { chat: 0, narration: 0, narration_debug: 0, caps_reply: 0 }
-    rows.forEach((row: Record<string, any>) => {
-      const kind = normalizePromptLogMessageKind(row.messageKind ?? row.message_kind)
-      kindTotals[kind] = (kindTotals[kind] || 0) + 1
+    messageRows.forEach((row) => {
+      kindTotals[row.messageKind] = (kindTotals[row.messageKind] || 0) + 1
     })
     const promptLogPairsByMessageId: Record<string, { hasReply: boolean; hasProjection: boolean }> = {}
     rows.forEach((row: Record<string, any>) => {
       const messageId = String(row.assistantMessageId || row.assistant_message_id || '').trim()
-      if (!messageId) return
+      if (!messageId || !String(row.id || '').trim()) return
       const pair = promptLogPairsByMessageId[messageId] || { hasReply: false, hasProjection: false }
-      if (String(row.logKind || row.log_kind || '') === 'message_projection') pair.hasProjection = true
+      if (isProjectionPromptLogKind(row.logKind ?? row.log_kind)) pair.hasProjection = true
       else pair.hasReply = true
       promptLogPairsByMessageId[messageId] = pair
     })
-    const byId: Record<string, { totalIndex: number; totalCount: number; kindIndex: number; kindTotal: number; messageKind: string; hasReply: boolean; hasProjection: boolean }> = {}
-    rows.forEach((row: Record<string, any>, index: number) => {
-      const kind = normalizePromptLogMessageKind(row.messageKind ?? row.message_kind)
-      kindSeen[kind] = (kindSeen[kind] || 0) + 1
-      const messageId = String(row.assistantMessageId || row.assistant_message_id || '').trim()
-      const pair = messageId ? promptLogPairsByMessageId[messageId] : null
-      byId[String(row.id || '')] = {
+    const messageMetaById: Record<string, { totalIndex: number; totalCount: number; kindIndex: number; kindTotal: number; messageKind: string }> = {}
+    messageRows.forEach((row, index) => {
+      kindSeen[row.messageKind] = (kindSeen[row.messageKind] || 0) + 1
+      messageMetaById[row.messageId] = {
         totalIndex: index + 1,
         totalCount,
-        kindIndex: kindSeen[kind],
-        kindTotal: kindTotals[kind] || 0,
-        messageKind: kind,
+        kindIndex: kindSeen[row.messageKind],
+        kindTotal: kindTotals[row.messageKind] || 0,
+        messageKind: row.messageKind
+      }
+    })
+    const byId: Record<string, { totalIndex: number; totalCount: number; kindIndex: number; kindTotal: number; messageKind: string; hasReply: boolean; hasProjection: boolean }> = {}
+    rows.forEach((row: Record<string, any>) => {
+      const logId = String(row.id || '').trim()
+      const messageId = String(row.assistantMessageId || row.assistant_message_id || '').trim()
+      if (!logId || !messageId) return
+      const messageMeta = messageMetaById[messageId]
+      if (!messageMeta) return
+      const pair = messageId ? promptLogPairsByMessageId[messageId] : null
+      byId[logId] = {
+        ...messageMeta,
         hasReply: pair?.hasReply === true,
         hasProjection: pair?.hasProjection === true
       }
@@ -1417,7 +1443,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       assistantMessageId: Number(row.assistantMessageId || row.assistant_message_id || 0),
       speakerName: String(row.speakerName || row.speaker_name || ''),
       targetId: String(row.targetId || row.target_id || ''),
-      logKind: String(row.logKind || row.log_kind || '') === 'message_projection' ? 'message_projection' : 'final_reply',
+      logKind: isProjectionPromptLogKind(row.logKind ?? row.log_kind) ? 'message_projection' : 'final_reply',
       hasReply: meta.hasReply === true,
       hasProjection: meta.hasProjection === true,
       finalPrompt,
@@ -1641,6 +1667,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
     }
     const workspaceId = getActiveWorkspaceId()
     const service = createAgentContextProjectionService({
+      cache: agentContextProjectionCache,
       loadSource: (_input, perspective) => {
         const session = bundle.data.session as Record<string, any>
         const participants = Array.isArray(bundle.data.participants) ? bundle.data.participants : []
@@ -2080,9 +2107,10 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       archive_name: body.archive_name ?? body.archiveName,
       archive_category: body.archive_category ?? body.archiveCategory,
       loaded_summary_ids: body.loaded_summary_ids ?? body.loadedSummaryIds,
-      // 批次4：滚动会话记忆摘要文本 + watermark（已折叠最高 messageId，复用零消费旧列 last_summary_time）。
+      // 批次4：滚动会话记忆摘要、更新时间与独立 messageId watermark。
       context_summary: body.context_summary ?? body.contextSummary,
       last_summary_time: body.last_summary_time ?? body.lastSummaryTime,
+      context_summary_message_id: body.context_summary_message_id ?? body.contextSummaryMessageId,
       virtual_scene_name: body.virtual_scene_name ?? body.virtualSceneName,
       virtual_scene_desc: body.virtual_scene_desc ?? body.virtualSceneDesc,
       virtual_location_large: body.virtual_location_large ?? body.virtualLocationLarge,
@@ -2730,7 +2758,8 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
           content: rawOutput || errorText || '空输出'
         }
       ]),
-      logKind: 'message_projection',
+      // 只有用户主动点击投影时才会调用本函数；单独的存储类型避免历史自动投影日志混回提示词库。
+      logKind: 'manual_projection',
       createdAt: new Date().toISOString()
     })
     return logId
@@ -2741,7 +2770,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
     messageId: number,
     options: WorkspaceRequestOptions = {},
     // 消耗溯源：批量投影由客户端铸 op:batch_projection:… 单元 id 传入；单条投影缺省并入消息所在轮。
-    usageUnit: { unitId?: string; unitKind?: string } = {}
+    usageUnit: { unitId?: string; unitKind?: string; promptLogMode?: 'manual' | 'background' } = {}
   ) {
     const normalizedSessionId = toText(sessionId)
     const normalizedMessageId = Number(messageId || 0)
@@ -2772,6 +2801,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       participants,
       previousProjections
     })
+    const shouldWritePromptLog = usageUnit.promptLogMode !== 'background'
     const attemptId = `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const projectionId = `projection_${normalizedSessionId}_${normalizedMessageId}_${attemptId}`
     // 用户消息必须按 role 剥离私密提调指令【【…】】：fallbackCleanText 是失败兜底时喂角色的文本，带指令=泄漏。
@@ -2810,7 +2840,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
           })
         })
       }
-      const promptLogId = insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, '', 'complete')
+      const promptLogId = shouldWritePromptLog
+        ? insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, '', 'complete')
+        : ''
       persistChatMutation()
       return { ok: true as const, data: { projection, promptLogId, rawOutput: '' } }
     }
@@ -2853,7 +2885,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         failureReason: reason || normalized.failureReason,
         completedAt: new Date().toISOString()
       })
-      const promptLogId = insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, rawOutput, 'failed', reason)
+      const promptLogId = shouldWritePromptLog
+        ? insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, rawOutput, 'failed', reason)
+        : ''
       persistChatMutation()
       return { ok: true as const, data: { projection, promptLogId, rawOutput, error: reason } }
     }
@@ -2935,7 +2969,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         })
       })
     }
-    const promptLogId = insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, rawOutput, normalized.status)
+    const promptLogId = shouldWritePromptLog
+      ? insertProjectionPromptLog(normalizedSessionId, normalizedMessageId, promptTrace, rawOutput, normalized.status)
+      : ''
     persistChatMutation()
     return { ok: true as const, data: { projection, promptLogId, rawOutput } }
   }
@@ -2970,29 +3006,6 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
     const participants = collectProjectionParticipants(normalizedSessionId, session)
     const sourceMessage = buildProjectionSourceMessage(normalizedSessionId, message, session, participants)
     const previousProjections = listPreviousProjectionInputs(normalizedSessionId, normalizedMessageId)
-    const basePromptTrace = buildMessageProjectionPrompt({
-      sessionId: normalizedSessionId,
-      message: sourceMessage,
-      participants,
-      previousProjections
-    })
-    const promptTrace = {
-      ...basePromptTrace,
-      finalPrompt: [
-        '【内嵌消息投影落库】',
-        '本次投影来自回复/旁白模型输出中的【消息投影】区块，未再调用消息投影模型。',
-        '',
-        basePromptTrace.finalPrompt
-      ].join('\n'),
-      promptBlocks: [
-        ...basePromptTrace.promptBlocks,
-        {
-          role: 'system',
-          title: '消息投影 · 内嵌来源',
-          content: '由生成模型随正文输出的【消息投影】区块解析后落库；正文仍以已保存消息内容为准。'
-        }
-      ]
-    }
     const rawOutput = toText(payload.projectionText ?? payload.projection_text)
     const failureReason = toText(payload.failureReason ?? payload.failure_reason)
     const failureStage = toText(payload.failureStage ?? payload.failure_stage) || 'parse_embedded_projection'
@@ -3060,16 +3073,8 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         })
       })
     }
-    const promptLogId = insertProjectionPromptLog(
-      normalizedSessionId,
-      normalizedMessageId,
-      promptTrace,
-      rawOutput,
-      status,
-      failureReason || normalized.failureReason
-    )
     persistChatMutation()
-    return { ok: true as const, data: { projection, promptLogId, rawOutput, embedded: true, error: status === 'failed' ? (failureReason || normalized.failureReason) : '' } }
+    return { ok: true as const, data: { projection, promptLogId: '', rawOutput, embedded: true, error: status === 'failed' ? (failureReason || normalized.failureReason) : '' } }
   }
 
   function normalizePersonalityRecallSections(value: unknown): PersonalityRecallSections | null {
@@ -3313,6 +3318,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         // 与旧版本记录（只存 versionIndex）不下发。
         if (kind === 'clean_retry') return hasDirectorStreamProcessSummary(payload)
         return hasPersonalityRerankerDiagnostics(payload)
+          || hasDirectPersonalityRerankerDiagnostics(payload)
           || hasPersonalityOrchestrationFailure(payload)
       })
       .filter((item: Record<string, any>) => {
@@ -3354,6 +3360,25 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       && distinctEncodedInputCount > 1
       && Number.isFinite(uniqueScoreCount)
       && uniqueScoreCount > 1
+  }
+
+  function hasDirectPersonalityRerankerDiagnostics(payload: Record<string, any>): boolean {
+    const diagnostics = payload.rerankerDiagnostics ?? payload.reranker_diagnostics
+    if (!diagnostics || typeof diagnostics !== 'object' || Array.isArray(diagnostics)) return false
+    const record = diagnostics as Record<string, any>
+    if (toText(record.executionPolicy ?? record.execution_policy) !== 'reuse_direct_personality_rerank') return false
+    const candidates = Array.isArray(payload.candidatePlans ?? payload.candidate_plans)
+      ? (payload.candidatePlans ?? payload.candidate_plans)
+      : []
+    const selected = Array.isArray(payload.topPlans ?? payload.top_plans)
+      ? (payload.topPlans ?? payload.top_plans)
+      : []
+    const selectedPlanId = toText(record.selectedPlanId ?? record.selected_plan_id)
+    if (candidates.length < 2 || selected.length !== 1 || !selectedPlanId) return false
+    const selectedId = toText(selected[0]?.id)
+    if (!selectedId || selectedId !== selectedPlanId) return false
+    if (record.degraded === true) return Boolean(toText(record.reason))
+    return candidates.every((candidate: Record<string, any>) => Number.isFinite(Number(candidate?.score)))
   }
 
   function hasReplyWorkflowProcessSummary(payload: Record<string, any>): boolean {
@@ -3481,6 +3506,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
           content: output || '空输出'
         }
       ]),
+      logKind: 'internal_agent',
       createdAt: new Date().toISOString()
     })
     return logId
@@ -4144,6 +4170,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       targetId: String(payload?.targetId ?? payload?.target_id ?? ''),
       finalPrompt: promptTrace.finalPrompt,
       promptBlocksJson: JSON.stringify(promptBlocks),
+      logKind: 'internal_agent',
       createdAt: new Date().toISOString()
     })
     persistChatMutation()
@@ -4367,6 +4394,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
           content: rawOutput || '空输出'
         }
       ]),
+      logKind: 'internal_agent',
       createdAt: new Date().toISOString()
     })
     return {
@@ -4621,6 +4649,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
           content: rawOutput || '空输出'
         }
       ]),
+      logKind: 'internal_agent',
       createdAt: new Date().toISOString()
     })
     return {
@@ -4805,7 +4834,7 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
       sessionId: string,
       messageId: string | number,
       options: WorkspaceRequestOptions = {},
-      usageUnit: { unitId?: string; unitKind?: string } = {}
+      usageUnit: { unitId?: string; unitKind?: string; promptLogMode?: 'manual' | 'background' } = {}
     ) {
       return runMessageProjectionAgent(String(sessionId || '').trim(), Number(messageId || 0), options, usageUnit)
     },
@@ -6885,7 +6914,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         return { ok: false as const, status: 404, error: '会话不存在' }
       }
       const safePage = Math.max(1, Number(page || 1))
-      const total = chatRepository.countPromptLogsBySessionId(normalizedSessionId)
+      const total = typeof chatRepository.countVisiblePromptLogMessagesBySessionId === 'function'
+        ? chatRepository.countVisiblePromptLogMessagesBySessionId(normalizedSessionId)
+        : chatRepository.countPromptLogsBySessionId(normalizedSessionId)
       const totalPages = Math.max(1, Math.ceil(total / pageSize))
       const currentPage = Math.min(safePage, totalPages)
       const offset = (currentPage - 1) * pageSize
@@ -6925,7 +6956,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         targetId: String(payload?.targetId || ''),
         finalPrompt,
         promptBlocksJson: JSON.stringify(promptBlocks),
-        logKind: String(payload?.logKind || '') === 'message_projection' ? 'message_projection' : 'final_reply',
+        logKind: ['internal_agent', 'manual_projection', 'message_projection'].includes(String(payload?.logKind || ''))
+          ? String(payload?.logKind || '')
+          : 'final_reply',
         createdAt: new Date().toISOString()
       })
       const entry = chatRepository.findPromptLogById(normalizedSessionId, logId)
@@ -7441,7 +7474,9 @@ export function createWorkspaceChatAppService(deps: WorkspaceChatDeps) {
         targetId: String(payload?.targetId || ''),
         finalPrompt,
         promptBlocksJson: JSON.stringify(promptBlocks),
-        logKind: String(payload?.logKind || '') === 'message_projection' ? 'message_projection' : 'final_reply',
+        logKind: ['internal_agent', 'manual_projection', 'message_projection'].includes(String(payload?.logKind || ''))
+          ? String(payload?.logKind || '')
+          : 'final_reply',
         createdAt: new Date().toISOString()
       })
       const entry = chatRepository.findPromptLogById(sessionId, logId)

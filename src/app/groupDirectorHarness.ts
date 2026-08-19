@@ -16,6 +16,8 @@
  */
 
 import { runAgentRuntime, type AgentRuntimeMessage } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import { createSessionSubagentControlCapability } from './agentRuntime/subagentControl'
 // R3-2：把 runtime 上抛的保真事件 append 进当前活动 append log（pipeline 已按 runId 起 log；无活动 log 时 append 自动空操作）。
 import { feedAppendLogFromFidelityEvent } from './agentState/appendLogFeed'
@@ -711,10 +713,23 @@ export async function runGroupDirectorHarness(
   const deferredSessionId = String(input.sessionId || '')
   const deferredRunId = String(input.directorRunId || '')
   if (deferredSessionId && deferredRunId) activateDeferredAgentRun(deferredSessionId, deferredRunId)
+  const runtimeVersion = 'group-director-agent-runtime-v1'
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId: runtimeProfileId,
+    runtimeVersion,
+    traceIds: [deferredSessionId, deferredRunId, input.postRoundSupplement ? 'post-round' : 'director-round']
+  })
   const runtimeResult = await runAgentRuntime({
     agentName: 'GroupDirectorAgent',
-    runtimeVersion: 'group-director-agent-runtime-v1',
+    runtimeVersion,
     messages: messages.map((message) => ({ role: message.role, content: message.content })),
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: runtimeProfileId,
+      runId: journalPreparation.runId,
+      goal: input.passInput.userText,
+      messages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     // 批次1B：registry 保留已授权全集；首轮只激活 manifest 高频集，其余经 toolsearch 按需激活。
     toolRegistry,
     deferredToolMode: directorToolSupply.deferredToolMode,

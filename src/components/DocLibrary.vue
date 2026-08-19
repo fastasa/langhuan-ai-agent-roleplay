@@ -1,6 +1,6 @@
 <template>
   <div ref="docLibraryRoot" :class="props.embedded ? 'leaf-docs leaf-docs--embedded' : 'leaf-docs'">
-    <header v-if="!isPromptExternalShell && !hideEmbeddedWorldbookTopbar" class="leaf-docs__topbar">
+    <header v-if="!isStandaloneModuleExternalShell && !hideEmbeddedWorldbookTopbar" class="leaf-docs__topbar">
       <div class="leaf-docs__topbar-spacer"></div>
 
       <div class="leaf-docs__titlebar"></div>
@@ -377,7 +377,10 @@
     <div
       v-show="activeLibraryTab !== 'worldbook'"
       class="leaf-docs__module-panel"
-      :class="{ 'leaf-docs__module-panel--prompt': activeLibraryTab === 'prompt' }"
+      :class="{
+        'leaf-docs__module-panel--prompt': activeLibraryTab === 'prompt',
+        'leaf-docs__module-panel--scenario-prompt': activeLibraryTab === 'scenarioPrompt'
+      }"
     >
       <section
         v-if="activeLibraryTab === 'relation'"
@@ -448,10 +451,14 @@
         </div>
       </section>
       <PromptLibraryPanel
-        v-else
+        v-else-if="activeLibraryTab === 'prompt'"
         ref="promptLibraryRef"
         :external-sidebar="props.externalSidebar"
         @sidebar-state-change="emit('sidebar-state-change', getSidebarState())"
+      />
+      <ScenarioPromptLibraryPanel
+        v-else-if="activeLibraryTab === 'scenarioPrompt'"
+        :external-sidebar="props.externalSidebar"
       />
     </div>
 
@@ -743,6 +750,7 @@ import RecallCompilePageConflictDialog from './recall/RecallCompilePageConflictD
 import CompilePageEntryButton from './recall/CompilePageEntryButton.vue'
 import DocLibraryEditorWorkspace from './doc-library/DocLibraryEditorWorkspace.vue'
 import DocLibraryPreviewPane from './doc-library/DocLibraryPreviewPane.vue'
+import ScenarioPromptLibraryPanel from './doc-library/ScenarioPromptLibraryPanel.vue'
 import WorldbookTreePanel from './doc-library/WorldbookTreePanel.vue'
 import WorldDraftImportDialog from './doc-library/WorldDraftImportDialog.vue'
 import SidebarFloatingMenu from './common/SidebarFloatingMenu.vue'
@@ -1052,7 +1060,10 @@ const { callAI } = useAI()
 const { toast } = useToast(runtimeStore)
 const activeLibraryTab = ref<LibraryTab>('worldbook')
 const visibleLibraryTabs = computed(() => getVisibleDocLibraryModuleTabs())
-const isPromptExternalShell = computed(() => props.externalSidebar && activeLibraryTab.value === 'prompt')
+const isStandaloneModuleExternalShell = computed(() => (
+  props.externalSidebar
+  && (activeLibraryTab.value === 'prompt' || activeLibraryTab.value === 'scenarioPrompt')
+))
 type PromptLibraryExpose = {
   getSidebarState?: () => DocSidebarState['prompt']
   selectPromptFromParent?: (recordId: string) => void
@@ -2348,7 +2359,7 @@ const hasSingleSelectedWorldbookDocument = computed(() => (
 const hasEditableWorldbookTarget = computed(() => Boolean(activeDocument.value || hasSingleSelectedWorldbookDocument.value || selectedWorldbookContainer.value))
 const quickSwitcherItems = computed<{ id: string; title: string; path: string }[]>(() => {
   const keyword = quickSwitcherQuery.value.trim().toLowerCase()
-  if (activeLibraryTab.value === 'prompt') return []
+  if (activeLibraryTab.value !== 'worldbook') return []
   const items = documentRecords.value.map((item) => ({ id: item.documentId, title: item.title, path: item.displayPath }))
   return !keyword ? items : items.filter((item) => item.title.toLowerCase().includes(keyword) || item.path.toLowerCase().includes(keyword))
 })
@@ -2372,7 +2383,6 @@ const currentTopbarItem = computed(() => {
     }
     return null
   }
-  if (activeLibraryTab.value === 'prompt') return null
   return null
 })
 const isTopbarEditMode = computed(() => (
@@ -2384,7 +2394,9 @@ const currentTopbarTitle = computed(() => (
   activeLibraryTab.value === 'worldbook'
     ? (draftTitle.value || activeDocument.value?.title || selectedWorldbookContainer.value?.label || '')
     : activeLibraryTab.value === 'prompt'
-      ? t('docLibrary.topbar.promptTitle')
+      ? t('docLibrary.topbar.rolePromptTitle')
+      : activeLibraryTab.value === 'scenarioPrompt'
+        ? t('docLibrary.topbar.scenarioPromptTitle')
       : ''
 ))
 const canUseTopbarSearch = computed(() => activeLibraryTab.value === 'worldbook')
@@ -7297,27 +7309,27 @@ function runWorldbookSidebarMenuAction(action: string, payload: { kind: 'folder'
 }
 
 function handleTopbarEdit() {
-  if (activeLibraryTab.value === 'prompt') return
+  if (activeLibraryTab.value !== 'worldbook') return
   openEditor().catch(() => {})
 }
 
 function handleTopbarCloseEditor() {
-  if (activeLibraryTab.value === 'prompt') return
+  if (activeLibraryTab.value !== 'worldbook') return
   closeEditor()
 }
 
 function handleTopbarSave() {
-  if (activeLibraryTab.value === 'prompt') return
+  if (activeLibraryTab.value !== 'worldbook') return
   void saveActiveDocument()
 }
 
 function handleTopbarDelete() {
-  if (activeLibraryTab.value === 'prompt') return
+  if (activeLibraryTab.value !== 'worldbook') return
   deleteActiveDocument()
 }
 
 function handleTopbarDuplicate() {
-  if (activeLibraryTab.value === 'prompt') return
+  if (activeLibraryTab.value !== 'worldbook') return
   duplicateActiveDocument()
 }
 
@@ -8380,6 +8392,10 @@ defineExpose({
 
 .leaf-docs__module-panel--prompt {
   background: transparent;
+}
+
+.leaf-docs__module-panel--scenario-prompt {
+  background: var(--morandi-bg);
 }
 
 .leaf-docs__relation-panel {

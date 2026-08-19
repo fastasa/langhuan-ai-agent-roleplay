@@ -33,11 +33,11 @@ describe('chatReplyPipelineMode', () => {
     })).toBe('normal_recall')
   })
 
-  it('supports personality model as a session mode and character override', () => {
+  it('migrates legacy personality session mode to auto and still supports an explicit character override', () => {
     expect(normalizeChatReplyPipelineMode('personality')).toBe('personality_model')
     expect(resolveSessionReplyPipelineMode({
       reply_pipeline_mode: 'message_projection'
-    })).toBe('personality_model')
+    })).toBe('normal_recall')
     expect(resolveReplyPipelineMode({
       session: { replyPipelineMode: 'normal_recall' },
       character: { replyPipelineModeOverride: 'personality_model', personalityModelPath: 'personality-models/char_1' }
@@ -51,7 +51,7 @@ describe('chatReplyPipelineMode', () => {
     expect(hasCharacterPersonalityModel({ personalityModelPath: '  ' })).toBe(false)
     expect(hasCharacterPersonalityModel(null)).toBe(false)
 
-    // 会话级人格模型 + 无模型角色 → 回退；配置态仍报 personality_model 供可见提示用。
+    // 旧会话级人格模型值已经迁入自动链路；无模型角色直接使用普通召回，不额外提示。
     expect(resolveReplyPipelineMode({
       session: { replyPipelineMode: 'personality_model' },
       character: { id: 'char_1' }
@@ -59,7 +59,7 @@ describe('chatReplyPipelineMode', () => {
     expect(resolveConfiguredReplyPipelineMode({
       session: { replyPipelineMode: 'personality_model' },
       character: { id: 'char_1' }
-    })).toBe('personality_model')
+    })).toBe('normal_recall')
 
     // 角色覆盖人格模型 + 无模型 → 回退；角色解析失败（null）同样按无模型兜底。
     expect(resolveReplyPipelineMode({
@@ -101,12 +101,27 @@ describe('chatReplyPipelineMode', () => {
     expect(normalizeCharacterReplyPipelineModeOverride('pure_prompt')).toBe('follow_session')
   })
 
-  it('keeps fast reply as a session orchestration mode while characters reuse normal recall', () => {
-    expect(normalizeChatSessionReplyPipelineMode('fast')).toBe('fast_reply')
-    expect(resolveSessionReplyPipelineMode({ reply_pipeline_mode: 'fast_reply' })).toBe('fast_reply')
+  it('migrates legacy fast reply to the automatic orchestration route', () => {
+    expect(normalizeChatSessionReplyPipelineMode('fast')).toBe('normal_recall')
+    expect(resolveSessionReplyPipelineMode({ reply_pipeline_mode: 'fast_reply' })).toBe('normal_recall')
     expect(resolveConfiguredReplyPipelineMode({
       session: { replyPipelineMode: 'fast_reply' },
       character: { id: 'char_1' }
+    })).toBe('normal_recall')
+  })
+
+  it('defaults to personality profile when a model is installed and to normal recall otherwise', () => {
+    expect(resolveReplyPipelineMode({
+      session: { replyPipelineMode: 'normal_recall' },
+      character: { id: 'char_1', personalityModelPath: 'personality-models/char_1' }
+    })).toBe('personality_model')
+    expect(resolveReplyPipelineMode({
+      session: { replyPipelineMode: 'normal_recall' },
+      character: { id: 'char_2' }
+    })).toBe('normal_recall')
+    expect(resolveReplyPipelineMode({
+      session: { replyPipelineMode: 'normal_recall' },
+      character: { id: 'char_1', personalityModelPath: 'personality-models/char_1', replyPipelineModeOverride: 'normal_recall' }
     })).toBe('normal_recall')
   })
 })

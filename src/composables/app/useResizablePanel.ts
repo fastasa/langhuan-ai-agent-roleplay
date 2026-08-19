@@ -48,7 +48,9 @@ export function useResizablePanel(options: ResizablePanelOptions) {
 
   function readStoredWidth() {
     if (typeof window === 'undefined') return
-    const raw = Number(window.localStorage.getItem(options.storageKey))
+    const stored = window.localStorage.getItem(options.storageKey)
+    if (stored === null || stored.trim() === '') return
+    const raw = Number(stored)
     if (Number.isFinite(raw)) {
       width.value = clampWidth(raw, options.minWidth, readMaxWidth(options))
     }

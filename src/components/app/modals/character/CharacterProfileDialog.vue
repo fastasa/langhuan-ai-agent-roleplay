@@ -39,11 +39,7 @@
             >
               <img v-if="avatarValue" class="character-profile-avatar__image" :src="avatarValue" alt="">
               <template v-else>
-                <svg class="character-profile-avatar__placeholder" viewBox="0 0 64 64" aria-hidden="true">
-                  <circle cx="32" cy="23" r="11" />
-                  <path d="M13 54c2-12 9-18 19-18s17 6 19 18" />
-                  <path d="M50 12v14M43 19h14" />
-                </svg>
+                <img class="character-profile-avatar__placeholder" :src="uploadPlaceholderUrl" alt="">
                 <span class="character-profile-avatar__text">点击上传 PNG、JPEG</span>
               </template>
             </button>
@@ -302,9 +298,9 @@
             <div class="form-group">
               <label>回复链路</label>
               <select v-model="form.replyPipelineModeOverride">
-                <option value="follow_session">跟随会话</option>
-                <option value="normal_recall">普通召回</option>
-                <option value="personality_model">人格模型</option>
+                <option value="follow_session">自动（有模型优先）</option>
+                <option value="normal_recall">强制普通召回</option>
+                <option value="personality_model">强制人格模型</option>
               </select>
             </div>
           </div>
@@ -419,6 +415,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppFormDialog from '../../../common/AppFormDialog.vue'
+import uploadPlaceholderUrl from '../../../../assets/illustrations/new-character-upload-placeholder.png'
 
 type ProfileForm = Record<string, any>
 type GroupOption = { id: string; name: string }
@@ -791,16 +788,12 @@ onBeforeUnmount(() => {
 
 .character-profile-avatar__placeholder {
   position: absolute;
-  inset: 22px 42px auto;
+  inset: -50px -50px -40px -50px;
   z-index: 0;
-  width: 64px;
-  height: 64px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  color: rgba(92, 138, 92, 0.7);
+  width: calc(110% + 90px);
+  height: calc(110% + 90px);
+  object-fit: contain;
+  border-radius: 0;
 }
 
 .character-profile-avatar__text {

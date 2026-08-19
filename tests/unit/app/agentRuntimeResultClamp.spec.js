@@ -13,7 +13,8 @@ function readToolResultChatContent(messages) {
   return JSON.parse(message.content).content
 }
 
-function runOnce(toolRegistry, toolName, onEvent) {
+function runOnce(toolRegistry, toolName, onEvent, runtimeOptions = {}) {
+  const usage = runtimeOptions.usage
   return runAgentRuntime({
     agentName: 'T',
     messages: [{ role: 'user', content: 'start' }],
@@ -22,8 +23,10 @@ function runOnce(toolRegistry, toolName, onEvent) {
     budget: { maxTurns: 1, maxToolCalls: 1 },
     callModel: () => ({
       toolCalls: [{ callId: 'c1', toolName, args: {} }],
-      done: true
+      done: true,
+      ...(usage ? { usage } : {})
     }),
+    ...(runtimeOptions.contextPressure ? { contextPressure: runtimeOptions.contextPressure } : {}),
     ...(onEvent ? { onEvent } : {})
   })
 }
@@ -88,5 +91,58 @@ describe('agentRuntime · 工具结果中央钳制（架构审查批B）', () =>
     expect(toolResultEvent).toBeTruthy()
     expect(toolResultEvent.toolResult.content).toBe(longText)
     expect(toolResultEvent.toolResult.content.length).toBe(longText.length)
+  })
+
+  it('只有显式配置且达到上下文压力时，超长表层改为 head+marker+tail；history/onEvent 仍保真', async () => {
+    const longText = `${'H'.repeat(4200)}${'M'.repeat(5000)}${'T'.repeat(1200)}`
+    // 10,400 字低于旧的 12,000 默认 clamp：若没有压力策略，本来会全文回灌。
+    expect(longText.length).toBeLessThan(DEFAULT_TOOL_RESULT_CLAMP_CHARS)
+    const registry = new ToolRegistry([{
+      name: 'pressureResult',
+      brief: '压力下折叠中间段',
+      execute: () => ({ content: longText })
+    }])
+    const events = []
+    const { messages, transcript } = await runOnce(
+      registry,
+      'pressureResult',
+      (event) => events.push(event),
+      {
+        usage: { promptTokens: 900, cacheReadTokens: 700 },
+        contextPressure: { contextWindowTokens: 1000, thresholdRatio: 0.8 }
+      }
+    )
+    const surfaced = readToolResultChatContent(messages)
+
+    expect(surfaced).toContain('工具结果因上下文压力折叠')
+    expect(surfaced.startsWith('H'.repeat(100))).toBe(true)
+    expect(surfaced.endsWith('T'.repeat(100))).toBe(true)
+    expect(surfaced).not.toContain('M'.repeat(2000))
+    expect(events.find((event) => event.kind === 'tool-result').toolResult.content).toBe(longText)
+    expect(transcript.history.find((item) => item.kind === 'toolResult').content).toBe(longText)
+  })
+
+  it('显式压力策略但未到阈值时保持旧行为；resultClampChars:null 仍拥有最高兼容优先级', async () => {
+    const text = `${'A'.repeat(4200)}${'B'.repeat(4200)}${'Z'.repeat(1000)}`
+    const lowPressureRegistry = new ToolRegistry([{
+      name: 'lowPressure', brief: '压力未达线', execute: () => ({ content: text })
+    }])
+    const low = await runOnce(lowPressureRegistry, 'lowPressure', null, {
+      usage: { promptTokens: 100 },
+      contextPressure: { contextWindowTokens: 100000, thresholdRatio: 0.8 }
+    })
+    expect(readToolResultChatContent(low.messages)).toBe(text)
+
+    const noClampRegistry = new ToolRegistry([{
+      name: 'noClampUnderPressure',
+      brief: '压力下仍显式不裁剪',
+      resultClampChars: null,
+      execute: () => ({ content: text })
+    }])
+    const noClamp = await runOnce(noClampRegistry, 'noClampUnderPressure', null, {
+      usage: { promptTokens: 900 },
+      contextPressure: { contextWindowTokens: 1000, thresholdRatio: 0.8 }
+    })
+    expect(readToolResultChatContent(noClamp.messages)).toBe(text)
   })
 })

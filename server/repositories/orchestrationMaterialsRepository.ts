@@ -4,6 +4,32 @@ import { toCamel } from '../application/shared/dbUtils.js'
 type MaterialsDb = Pick<typeof db, 'prepare' | 'exec'>
 type Row = Record<string, any>
 
+function serializeDependencySnapshot(value: unknown): string {
+  if (typeof value === 'string') return value.trim() || '{}'
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    try { return JSON.stringify(value) } catch { return '{}' }
+  }
+  return '{}'
+}
+
+function toStateRow(row: Row | null): Row | null {
+  if (!row) return null
+  const state = toCamel(row) as Row
+  const dependencySnapshotJson = serializeDependencySnapshot(row.dependency_snapshot_json)
+  let dependencySnapshot: Record<string, unknown> | undefined
+  try {
+    const parsed = JSON.parse(dependencySnapshotJson)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) dependencySnapshot = parsed
+  } catch {
+    /* 坏旧值保留原文，调用侧安全降级 unknown。 */
+  }
+  return {
+    ...state,
+    dependencySnapshotJson,
+    ...(dependencySnapshot ? { dependencySnapshot } : {})
+  }
+}
+
 export function createOrchestrationMaterialsRepository(database: MaterialsDb = db) {
   const insertOverride = (row: Row) => database.prepare(`
     INSERT INTO chat_session_narrative_overrides
@@ -14,11 +40,11 @@ export function createOrchestrationMaterialsRepository(database: MaterialsDb = d
   const insertState = (row: Row) => database.prepare(`
     INSERT INTO chat_session_orchestration_state
       (id, session_id, world_id, scenario_code, scenario_label, scenario_summary,
-       anchor_message_id, source_artifact_id, version, source, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       anchor_message_id, source_artifact_id, dependency_snapshot_json, version, source, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     row.id, row.sessionId, row.worldId, row.scenarioCode, row.scenarioLabel, row.scenarioSummary,
-    row.anchorMessageId, row.sourceArtifactId, row.version, row.source, row.createdAt, row.updatedAt
+    row.anchorMessageId, row.sourceArtifactId, serializeDependencySnapshot(row.dependencySnapshotJson ?? row.dependencySnapshot), row.version, row.source, row.createdAt, row.updatedAt
   )
 
   return {
@@ -31,7 +57,7 @@ export function createOrchestrationMaterialsRepository(database: MaterialsDb = d
       `).get(sessionId, worldId) as Row | null)
     },
     findState(sessionId: string, worldId: string) {
-      return toCamel(database.prepare(`
+      return toStateRow(database.prepare(`
         SELECT * FROM chat_session_orchestration_state WHERE session_id = ? AND world_id = ?
       `).get(sessionId, worldId) as Row | null)
     },
@@ -54,18 +80,18 @@ export function createOrchestrationMaterialsRepository(database: MaterialsDb = d
       return database.prepare(`
         UPDATE chat_session_orchestration_state SET
           scenario_code = ?, scenario_label = ?, scenario_summary = ?, anchor_message_id = ?,
-          source_artifact_id = ?, version = version + 1, source = ?, updated_at = ?
+          source_artifact_id = ?, dependency_snapshot_json = ?, version = version + 1, source = ?, updated_at = ?
         WHERE id = ? AND session_id = ? AND world_id = ? AND version = ?
       `).run(
         row.scenarioCode, row.scenarioLabel, row.scenarioSummary, row.anchorMessageId,
-        row.sourceArtifactId, row.source, row.updatedAt, row.id, row.sessionId, row.worldId, expectedVersion
+        row.sourceArtifactId, serializeDependencySnapshot(row.dependencySnapshotJson ?? row.dependencySnapshot), row.source, row.updatedAt, row.id, row.sessionId, row.worldId, expectedVersion
       ).changes
     },
     getAllOverrides() {
       return database.prepare('SELECT * FROM chat_session_narrative_overrides ORDER BY session_id, world_id').all().map(toCamel)
     },
     getAllStates() {
-      return database.prepare('SELECT * FROM chat_session_orchestration_state ORDER BY session_id, world_id').all().map(toCamel)
+      return database.prepare('SELECT * FROM chat_session_orchestration_state ORDER BY session_id, world_id').all().map((row) => toStateRow(row as Row))
     },
     replaceAllOverrides(rows: Row[]) {
       database.prepare('DELETE FROM chat_session_narrative_overrides').run()

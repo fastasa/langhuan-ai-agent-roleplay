@@ -559,6 +559,7 @@ export function createChatRepository(database: ChatDb = db) {
       lastSummaryTime: string
       loadedSummaryIds: string
       contextSummary: string
+      contextSummaryMessageId?: number
       updatedAt: string | null
       virtualSceneName: string
       virtualSceneDesc: string
@@ -601,11 +602,11 @@ export function createChatRepository(database: ChatDb = db) {
         INSERT OR REPLACE INTO chat_sessions (
           id, target_id, target_type, title,
           conversation_avatar_path, conversation_emoji,
-          summary, last_summary_time, loaded_summary_ids, context_summary, caps_residue_state_json,
+          summary, last_summary_time, loaded_summary_ids, context_summary, context_summary_message_id, caps_residue_state_json,
           updated_at, virtual_scene_name, virtual_scene_desc, virtual_location_large, virtual_location_middle, virtual_location_small, virtual_location, virtual_real_location, virtual_time,
           virtual_time_anchor, virtual_time_base, virtual_time_rate, virtual_weather, virtual_weather_mode,
           bound_alias, narration_frequency, narration_temperature, narration_profiles, narration_force_enabled, chat_font_scale, dynamic_world_enabled, reply_pipeline_mode, temp_model, temp_preset, linked_archive_id, kind
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         sessionId,
         payload.targetId,
@@ -617,6 +618,7 @@ export function createChatRepository(database: ChatDb = db) {
         payload.lastSummaryTime,
         payload.loadedSummaryIds,
         payload.contextSummary,
+        Math.max(0, Math.trunc(Number(payload.contextSummaryMessageId || 0))),
         payload.capsResidueStateJson ?? payload.caps_residue_state_json ?? '{}',
         payload.updatedAt,
         payload.virtualSceneName,
@@ -1078,6 +1080,24 @@ export function createChatRepository(database: ChatDb = db) {
       `).get(sessionId) as { count?: number } | undefined
       return Number(row?.count || 0)
     },
+    countVisiblePromptLogMessagesBySessionId(sessionId: string) {
+      const row = database.prepare(`
+        SELECT COUNT(DISTINCT logs.assistant_message_id) as count
+        FROM chat_prompt_logs logs
+        JOIN chat_messages messages
+          ON messages.session_id = logs.session_id
+         AND messages.id = logs.assistant_message_id
+        WHERE logs.session_id = ?
+          AND logs.assistant_message_id > 0
+          AND messages.role = 'assistant'
+          AND COALESCE(logs.log_kind, 'final_reply') IN ('final_reply', 'manual_projection')
+          AND NOT (
+            trim(logs.final_prompt) = '已删除'
+            AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
+          )
+      `).get(sessionId) as { count?: number } | undefined
+      return Number(row?.count || 0)
+    },
     insertPromptLog(sessionId: string, payload: {
       id: string
       pageIndex: number
@@ -1105,75 +1125,136 @@ export function createChatRepository(database: ChatDb = db) {
         payload.targetId,
         payload.finalPrompt,
         payload.promptBlocksJson,
-        payload.logKind === 'message_projection' ? 'message_projection' : 'final_reply',
+        ['message_projection', 'manual_projection', 'internal_agent'].includes(String(payload.logKind || ''))
+          ? String(payload.logKind || '')
+          : 'final_reply',
         payload.createdAt
       )
     },
     listPromptLogsBySessionId(sessionId: string, limit: number, offset: number) {
+      const [userId, workspaceId] = getScopeParams()
       return database.prepare(`
-        SELECT logs.*, messages.message_kind AS message_kind
-        FROM chat_prompt_logs logs
-        JOIN chat_messages messages
-          ON messages.session_id = logs.session_id
-         AND messages.id = logs.assistant_message_id
-        WHERE logs.session_id = ?
-          AND logs.assistant_message_id > 0
-          AND NOT (
-            trim(logs.final_prompt) = '已删除'
-            AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
-          )
-        ORDER BY datetime(logs.created_at) DESC, logs.id DESC
-        LIMIT ? OFFSET ?
-      `).all(sessionId, limit, offset).map(toCamel)
+        /* unscoped: CTE 已对 logs/messages 显式写入 user_id + workspace_id 隔离 */
+        WITH eligible AS (
+          SELECT logs.*, messages.message_kind AS message_kind,
+                 messages.created_at AS message_created_at
+          FROM chat_prompt_logs logs
+          JOIN chat_messages messages
+            ON messages.session_id = logs.session_id
+           AND messages.id = logs.assistant_message_id
+          WHERE logs.session_id = ?
+            AND logs.user_id = ?
+            AND logs.workspace_id = ?
+            AND messages.user_id = ?
+            AND messages.workspace_id = ?
+            AND logs.assistant_message_id > 0
+            AND messages.role = 'assistant'
+            AND COALESCE(logs.log_kind, 'final_reply') IN ('final_reply', 'manual_projection')
+            AND NOT (
+              trim(logs.final_prompt) = '已删除'
+              AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
+            )
+        ),
+        message_page AS (
+          SELECT assistant_message_id, MAX(message_created_at) AS message_created_at
+          FROM eligible
+          GROUP BY assistant_message_id
+          ORDER BY datetime(message_created_at) DESC, assistant_message_id DESC
+          LIMIT ? OFFSET ?
+        ),
+        ranked AS (
+          SELECT eligible.*,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY eligible.assistant_message_id,
+                     CASE WHEN eligible.log_kind = 'manual_projection' THEN 'manual_projection' ELSE 'final_reply' END
+                   ORDER BY datetime(eligible.created_at) DESC, eligible.id DESC
+                 ) AS kind_rank
+          FROM eligible
+          JOIN message_page ON message_page.assistant_message_id = eligible.assistant_message_id
+        )
+        SELECT *
+        FROM ranked
+        WHERE kind_rank = 1
+        ORDER BY datetime(message_created_at) DESC, assistant_message_id DESC,
+                 CASE WHEN log_kind = 'manual_projection' THEN 1 ELSE 0 END ASC
+      `).all(sessionId, userId, workspaceId, userId, workspaceId, limit, offset).map(toCamel)
     },
     listPromptLogIndexRowsBySessionId(sessionId: string) {
       return database.prepare(`
         SELECT logs.id,
-               logs.assistant_message_id,
+               messages.id AS assistant_message_id,
                logs.log_kind,
                messages.message_kind AS message_kind
-        FROM chat_prompt_logs logs
-        JOIN chat_messages messages
-          ON messages.session_id = logs.session_id
-         AND messages.id = logs.assistant_message_id
-        WHERE logs.session_id = ?
-          AND logs.assistant_message_id > 0
-          AND NOT (
-            trim(logs.final_prompt) = '已删除'
-            AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
-          )
-        ORDER BY datetime(logs.created_at) ASC, logs.id ASC
+        FROM chat_messages messages
+        LEFT JOIN chat_prompt_logs logs
+          ON logs.session_id = messages.session_id
+         AND logs.assistant_message_id = messages.id
+         AND COALESCE(logs.log_kind, 'final_reply') IN ('final_reply', 'manual_projection')
+         AND NOT (
+           trim(logs.final_prompt) = '已删除'
+           AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
+         )
+        WHERE messages.session_id = ?
+          AND messages.role = 'assistant'
+        ORDER BY datetime(messages.created_at) ASC, messages.id ASC,
+                 datetime(logs.created_at) ASC, logs.id ASC
       `).all(sessionId).map(toCamel)
     },
     getPromptLogPageById(sessionId: string, logId: string, pageSize = 30) {
+      const [userId, workspaceId] = getScopeParams()
       const row = database.prepare(`
+        /* unscoped: CTE 已对 logs/messages 显式写入 user_id + workspace_id 隔离 */
+        WITH selected_message AS (
+          SELECT messages.id, messages.created_at
+          FROM chat_prompt_logs logs
+          JOIN chat_messages messages
+            ON messages.session_id = logs.session_id
+           AND messages.id = logs.assistant_message_id
+          WHERE logs.session_id = ? AND logs.id = ?
+            AND logs.user_id = ?
+            AND logs.workspace_id = ?
+            AND messages.user_id = ?
+            AND messages.workspace_id = ?
+          LIMIT 1
+        ),
+        visible_messages AS (
+          SELECT DISTINCT messages.id, messages.created_at
+          FROM chat_prompt_logs logs
+          JOIN chat_messages messages
+            ON messages.session_id = logs.session_id
+           AND messages.id = logs.assistant_message_id
+          WHERE logs.session_id = ?
+            AND logs.user_id = ?
+            AND logs.workspace_id = ?
+            AND messages.user_id = ?
+            AND messages.workspace_id = ?
+            AND messages.role = 'assistant'
+            AND COALESCE(logs.log_kind, 'final_reply') IN ('final_reply', 'manual_projection')
+            AND NOT (
+              trim(logs.final_prompt) = '已删除'
+              AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
+            )
+        )
         SELECT COUNT(*) as before_count
-        FROM chat_prompt_logs logs
-        JOIN chat_messages messages
-          ON messages.session_id = logs.session_id
-         AND messages.id = logs.assistant_message_id
-        WHERE logs.session_id = ?
-          AND logs.assistant_message_id > 0
-          AND NOT (
-            trim(logs.final_prompt) = '已删除'
-            AND (logs.prompt_blocks_json IS NULL OR trim(logs.prompt_blocks_json) = '' OR trim(logs.prompt_blocks_json) = '[]')
-          )
-          AND (
-            datetime(logs.created_at) > (
-              SELECT datetime(created_at)
-              FROM chat_prompt_logs
-              WHERE session_id = ? AND id = ?
-            )
-            OR (
-              datetime(logs.created_at) = (
-                SELECT datetime(created_at)
-                FROM chat_prompt_logs
-                WHERE session_id = ? AND id = ?
-              )
-              AND logs.id > ?
-            )
-          )
-      `).get(sessionId, sessionId, logId, sessionId, logId, logId) as { before_count?: number } | undefined
+        FROM visible_messages, selected_message
+        WHERE datetime(visible_messages.created_at) > datetime(selected_message.created_at)
+           OR (
+             datetime(visible_messages.created_at) = datetime(selected_message.created_at)
+             AND visible_messages.id > selected_message.id
+           )
+      `).get(
+        sessionId,
+        logId,
+        userId,
+        workspaceId,
+        userId,
+        workspaceId,
+        sessionId,
+        userId,
+        workspaceId,
+        userId,
+        workspaceId
+      ) as { before_count?: number } | undefined
       return Math.floor(Number(row?.before_count || 0) / Math.max(1, pageSize)) + 1
     },
     bindPromptLogMessage(sessionId: string, logId: string, assistantMessageId: number) {
@@ -1187,12 +1268,12 @@ export function createChatRepository(database: ChatDb = db) {
       return toCamel(database.prepare('SELECT * FROM chat_prompt_logs WHERE id = ? AND session_id = ?').get(logId, sessionId))
     },
     findLatestPromptLogByMessageId(sessionId: string, assistantMessageId: number, kind = '') {
-      // kind 为空时退回旧“取最新一条”行为；'final_reply' 排除消息投影日志；'message_projection' 只取投影日志
+      // 用户可见日志只有最终回复与“手动触发”的投影；自动/内嵌投影及内部编排不进入提示词库。
       const kindClause = kind === 'message_projection'
-        ? "AND COALESCE(logs.log_kind, '') = 'message_projection'"
+        ? "AND COALESCE(logs.log_kind, '') = 'manual_projection'"
         : kind === 'final_reply'
-          ? "AND COALESCE(logs.log_kind, '') != 'message_projection'"
-          : ''
+          ? "AND COALESCE(logs.log_kind, 'final_reply') = 'final_reply'"
+          : "AND COALESCE(logs.log_kind, 'final_reply') IN ('final_reply', 'manual_projection')"
       return toCamel(database.prepare(`
         SELECT logs.*, messages.message_kind AS message_kind
         FROM chat_prompt_logs logs
@@ -1213,8 +1294,8 @@ export function createChatRepository(database: ChatDb = db) {
     countPromptLogKindsByMessageId(sessionId: string, assistantMessageId: number) {
       const row = database.prepare(`
         SELECT
-          SUM(CASE WHEN COALESCE(logs.log_kind, '') = 'message_projection' THEN 1 ELSE 0 END) AS projection_count,
-          SUM(CASE WHEN COALESCE(logs.log_kind, '') != 'message_projection' THEN 1 ELSE 0 END) AS reply_count
+          SUM(CASE WHEN COALESCE(logs.log_kind, '') = 'manual_projection' THEN 1 ELSE 0 END) AS projection_count,
+          SUM(CASE WHEN COALESCE(logs.log_kind, 'final_reply') = 'final_reply' THEN 1 ELSE 0 END) AS reply_count
         FROM chat_prompt_logs logs
         WHERE logs.session_id = ?
           AND logs.assistant_message_id = ?
@@ -1840,12 +1921,16 @@ export function createChatRepository(database: ChatDb = db) {
       const stmt = database.prepare(`
         INSERT INTO chat_session_orchestration_state
           (id, session_id, world_id, scenario_code, scenario_label, scenario_summary,
-           anchor_message_id, source_artifact_id, version, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           anchor_message_id, source_artifact_id, dependency_snapshot_json, version, source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       rows.forEach((row) => stmt.run(
         row.id, row.sessionId, row.worldId, row.scenarioCode, row.scenarioLabel, row.scenarioSummary,
-        row.anchorMessageId, row.sourceArtifactId, row.version, row.source, row.createdAt, row.updatedAt
+        row.anchorMessageId, row.sourceArtifactId,
+        typeof row.dependencySnapshotJson === 'string'
+          ? row.dependencySnapshotJson
+          : JSON.stringify(row.dependencySnapshotJson || row.dependencySnapshot || {}),
+        row.version, row.source, row.createdAt, row.updatedAt
       ))
     },
     // 世界（批3 接快照）：worlds 是状态栏/地图世界级归属的根，导出恢复必须带，否则 world_id 悬空
@@ -4131,7 +4216,7 @@ export function createChatRepository(database: ChatDb = db) {
       const sessionColSet = new Set(sessionCols.map(item => item.name).filter(Boolean))
       const sessionBaseColumns = [
         'id', 'target_id', 'target_type', 'title',
-        'summary', 'last_summary_time', 'context_summary', 'caps_residue_state_json',
+        'summary', 'last_summary_time', 'context_summary', 'context_summary_message_id', 'caps_residue_state_json',
         'loaded_summary_ids', 'virtual_scene_name', 'virtual_scene_desc',
         'virtual_location_large', 'virtual_location_middle', 'virtual_location_small',
         'virtual_location', 'virtual_scene_world_id', 'virtual_location_sheet_id', 'virtual_location_feature_id',
@@ -4601,7 +4686,9 @@ export function createChatRepository(database: ChatDb = db) {
           row.targetId,
           row.finalPrompt,
           row.promptBlocksJson,
-          row.logKind === 'message_projection' ? 'message_projection' : 'final_reply',
+          ['message_projection', 'manual_projection', 'internal_agent'].includes(String(row.logKind || ''))
+            ? String(row.logKind || '')
+            : 'final_reply',
           row.createdAt
         )
       })

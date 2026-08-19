@@ -1,4 +1,4 @@
-export type DocLibraryModuleTab = 'worldbook' | 'relation' | 'prompt'
+export type DocLibraryModuleTab = 'worldbook' | 'relation' | 'prompt' | 'scenarioPrompt'
 
 export type DocLibraryModuleTabItem = {
   id: DocLibraryModuleTab
@@ -9,7 +9,8 @@ export type DocLibraryModuleTabItem = {
 export const DOC_LIBRARY_MODULE_TABS: DocLibraryModuleTabItem[] = [
   { id: 'worldbook', labelKey: 'docLibrary.moduleTab.worldTree' },
   { id: 'relation', labelKey: 'docLibrary.moduleTab.relation' },
-  { id: 'prompt', labelKey: 'docLibrary.topbar.promptTitle' }
+  { id: 'prompt', labelKey: 'docLibrary.topbar.rolePromptTitle' },
+  { id: 'scenarioPrompt', labelKey: 'docLibrary.topbar.scenarioPromptTitle' }
 ]
 
 const HIDDEN_DOC_LIBRARY_MODULE_TABS = new Set<DocLibraryModuleTab>()
@@ -27,3 +28,6 @@ export function normalizeVisibleDocLibraryModuleTab(tab: DocLibraryModuleTab) {
     ? tab
     : 'worldbook'
 }
+
+export const SCENARIO_PROMPT_TREE_TARGET_ID = 'doc-scenario-prompt-tree-target'
+export const SCENARIO_PROMPT_ACTIONS_TARGET_ID = 'doc-scenario-prompt-actions-target'

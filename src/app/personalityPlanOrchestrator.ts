@@ -22,7 +22,18 @@ export const REPLY_PLAN_ORCHESTRATOR_ALLOWED_TOOLS = [
 
 export type ReplyPlanOrchestratorToolName = typeof REPLY_PLAN_ORCHESTRATOR_ALLOWED_TOOLS[number]
 
-export type ReplyPlanScenario = 'pressure' | 'joy' | 'custom'
+export type ReplyPlanScenario =
+  | 'pressure'
+  | 'nsfw'
+  | 'anger'
+  | 'awkward'
+  | 'sadness'
+  | 'fear'
+  | 'jealousy'
+  | 'guilt'
+  | 'excitement'
+  | 'fatigue'
+  | 'custom'
 
 export type ReplyPlanIntensity = string
 
@@ -77,7 +88,7 @@ export interface ReplyPlanScenarioMountedPrompt {
 
 /** 情境 skill（全局可编辑配置的一项）：触发描述（短，路由用）+ 正文（自然语言，按需读）。 */
 export interface ReplyPlanScenarioConfig {
-  code: string      // 情境机器名（小写），如 pressure / joy / calm
+  code: string      // 情境机器名（小写），如 pressure / excitement / calm
   label: string     // 情境中文名，如 压力
   trigger: string   // 触发描述（短）：注入编排器「可用情境清单」帮助 LLM 路由判别
   body: string      // skill 正文（自然语言）：反应类别/强度/生成要求，按需读取
@@ -374,15 +385,11 @@ export function createPressureScenarioBody(): string {
   ].join('\n')
 }
 
-/** 默认喜悦情境正文。 */
-export function createJoyScenarioBody(): string {
-  return [
-    '喜悦情境下，角色通常在三类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high / very_high 四档：',
-    '- 分享（share）：把喜悦自然传递给对方，重点写如何主动分享与邀请共情。',
-    '- 明亮化（brighten）：神态、动作和语气变得更轻盈明亮，重点写外显的轻快变化。',
-    '- 靠近（approach）：温和推进关系距离，重点写如何自然拉近而不越界。',
-    'planPrompt 只写给计划模型的第三视角行动计划任务说明，不写完整台词、引号对白或可直接发送的回复。'
-  ].join('\n')
+const DEFAULT_SCENARIO_PLAN_PROMPT_RULE =
+  'planPrompt 只写给计划模型的第三视角行动计划任务说明，不写完整台词，引导对白或可直接发送的回复。'
+
+function createDefaultScenarioBody(lines: string[]): string {
+  return [...lines, DEFAULT_SCENARIO_PLAN_PROMPT_RULE].join('\n')
 }
 
 /** 默认渐进式工具注册表 seed：plan 工具注入清单，meta 工具供 runtime 读取上下文与手册。 */
@@ -504,7 +511,7 @@ export const DEFAULT_REPLY_PLAN_ORCHESTRATOR_SYSTEM_PROMPT = [
   '生成轮示例（只发起一次 generatePlanBatch 原生函数调用、batches 带全部类别，并在 content 顶层给出 expressionMix）：content JSON 形如 {"scenario":"pressure","thought":"据正文把全部反应类别放进一次 generatePlanBatch 的 batches","expressionMix":{"action":40,"dialogue":35,"expression":20,"innerState":5,"narration":0},"wordCountAdvice":{"min":800,"max":1200},"done":false,"orchestrationSummary":""}，并发起一次 generatePlanBatch 原生函数调用（参数 batches=[{"strategy":"aggressive","strategyLabel":"进攻性","intensities":["low","medium","high"],"planPrompt":"..."},{"strategy":"defensive",...}]、expectation="一次返回全部类别×强度的候选"）。'
 ].join('\n')
 
-/** 默认全局编排配置（缺省 seed）：默认规则 + 压力 / 喜悦两套情境（trigger + body）+ 工具注册表。 */
+/** 默认全局编排配置（缺省 seed）：默认规则 + 10 套情境（trigger + body）+ 工具注册表。 */
 export const DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG: ReplyPlanOrchestratorConfig = {
   systemPrompt: DEFAULT_REPLY_PLAN_ORCHESTRATOR_SYSTEM_PROMPT,
   scenarios: [
@@ -515,10 +522,121 @@ export const DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG: ReplyPlanOrchestratorConfig
       body: createPressureScenarioBody()
     },
     {
-      code: 'joy',
-      label: '喜悦',
-      trigger: '高涨、被肯定、关系升温或获得正向结果时触发；角色把喜悦自然传递并推进关系。',
-      body: createJoyScenarioBody()
+      code: 'nsfw',
+      label: 'NSFW',
+      trigger: '仅成年角色。出现明确的性吸引、暧昧升级、身体亲密或带有性意味的互动时触发；角色需要根据关系、欲望、边界和当前环境作出反应。',
+      body: createDefaultScenarioBody([
+        'NSFW 情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 主动（initiate）：主动推进暧昧或亲密互动；低档是试探、暗示和缩短距离，高档是明确表达欲望并主动推进。',
+        '- 回应（reciprocate）：接受并回应对方释放的亲密信号；强调角色不是发起者，而是在确认意愿后顺势回应。',
+        '- 克制（restrain）：存在欲望或吸引，但主动压住行动；可表现为转移视线、保持距离、改变话题或提醒自己当前不合适。',
+        '- 拒绝（refuse）：不愿继续当前亲密互动，明确建立边界、后退、制止或离开；强度越高，拒绝越直接。',
+        '行为必须服从角色既有关系、性格、经历与当前意愿，不因进入 NSFW 情境就自动产生欲望或同意。'
+      ])
+    },
+    {
+      code: 'anger',
+      label: '愤怒',
+      trigger: '被冒犯、被欺骗、利益受损、边界被侵犯、计划被破坏或目睹强烈不公时触发；角色需要处理明显的愤怒和敌意。',
+      body: createDefaultScenarioBody([
+        '愤怒情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 爆发（confront）：把愤怒直接指向刺激来源；低档是语气变硬、质问，高档是公开冲突、强硬阻止或激烈对抗。',
+        '- 压抑（suppress）：明显生气但暂时不表达；通过沉默、绷紧动作、简短回应或强行继续当前事务体现。',
+        '- 疏离（withdraw）：停止投入当前互动，通过离开、冷处理、减少交流或刻意拉开关系来处理愤怒。',
+        '- 转化（redirect）：不直接发火，而把愤怒转成行动；例如调查、解决问题、证明自己、保护某人或准备之后处理。',
+        '愤怒不等于失控；反应应受到角色性格、自控力、双方关系和现实后果约束。'
+      ])
+    },
+    {
+      code: 'awkward',
+      label: '尴尬',
+      trigger: '说错话、被当众关注、秘密被点破、社交失误、暧昧被揭穿或双方突然不知道如何继续互动时触发。',
+      body: createDefaultScenarioBody([
+        '尴尬情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 掩饰（cover）：假装事情并不严重，通过自然接话、装作没注意到或维持正常动作掩盖尴尬。',
+        '- 转移（deflect）：迅速改变话题、关注别的事情或把注意力推向其他人，避免继续停留在尴尬点上。',
+        '- 自嘲（self_deprecate）：主动承认自己的窘迫，并通过玩笑、自我调侃或轻描淡写降低社交压力。',
+        '- 僵住（freeze）：短时间失去自然反应；表现为停顿、眼神躲闪、动作不自然、说话卡顿或一时不知道该做什么。',
+        '不要把尴尬统一写成脸红；应根据人物性格产生不同的社交防御行为。'
+      ])
+    },
+    {
+      code: 'sadness',
+      label: '悲伤',
+      trigger: '遭遇失去、失败、离别、失望、被拒绝或重要期待落空时触发；角色需要处理明显的低落和情绪痛苦。',
+      body: createDefaultScenarioBody([
+        '悲伤情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 倾诉（seek_support）：寻找可信任的人陪伴、说出感受或主动寻求安慰。',
+        '- 独处（withdraw）：减少交流，寻找安静空间独自消化情绪。',
+        '- 强撑（mask）：维持正常状态，继续工作、说笑或照顾别人，但通过细微异常泄露真实情绪。',
+        '- 沉浸（grieve）：允许自己停留在悲伤里，回忆、哭泣、整理旧物或反复思考失去的东西。',
+        '悲伤应体现角色真正重视了什么，而不只是泛化地“情绪低落”。'
+      ])
+    },
+    {
+      code: 'fear',
+      label: '恐惧',
+      trigger: '面临危险、未知威胁、可能受伤、重要事物可能失去或无法判断风险来源时触发；角色进入明显的警戒状态。',
+      body: createDefaultScenarioBody([
+        '恐惧情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 对抗（fight）：把注意力集中到威胁上，准备阻止、反击或保护自己及他人。',
+        '- 逃离（flight）：主动扩大与危险之间的距离，寻找出口、安全区域或撤退路线。',
+        '- 僵住（freeze）：短暂失去行动能力，注意力锁死在威胁上，身体和思维出现停顿。',
+        '- 求援（seek_help）：迅速寻找可信任的人、群体、工具或安全设施，把解决危险的能力交给更可靠的外部资源。',
+        '恐惧反应应依据角色对危险的主观判断，而不是只根据客观危险程度。'
+      ])
+    },
+    {
+      code: 'jealousy',
+      label: '嫉妒',
+      trigger: '角色重视的人把注意力、亲密、认可或资源给予别人，使角色产生被替代、被比较或可能失去关系的感觉时触发。',
+      body: createDefaultScenarioBody([
+        '嫉妒情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 争取（compete）：主动重新争取对方的注意、认可或关系位置；强度越高，竞争意识越明显。',
+        '- 试探（probe）：通过观察、旁敲侧击、询问或制造小测试，确认自己与第三者分别处在什么位置。',
+        '- 掩饰（hide）：意识到自己的嫉妒，但因为自尊、身份或关系原因不愿暴露，表面维持正常。',
+        '- 疏远（withdraw）：因为感到自己被冷落或替代，降低投入、减少互动甚至主动拉开距离。',
+        '嫉妒的核心不是“讨厌第三者”，而是角色担心自己失去某种重要位置。'
+      ])
+    },
+    {
+      code: 'guilt',
+      label: '内疚',
+      trigger: '角色认为自己的选择伤害了别人、造成坏结果、违背承诺或违反自身价值观时触发。',
+      body: createDefaultScenarioBody([
+        '内疚情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 补偿（repair）：试图修复自己造成的损失，通过帮助、补偿、承担责任或弥补后果降低亏欠感。',
+        '- 坦白（confess）：主动承认自己的行为、错误或隐瞒，并承担对方可能产生的反应。',
+        '- 逃避（avoid）：因为害怕面对后果而回避相关人物、话题、地点或证据。',
+        '- 合理化（justify）：通过寻找理由重新解释自己的行为，试图说服自己“当时只能这样做”或责任并不完全属于自己。',
+        '内疚越强，不代表一定越愿意道歉；高内疚也可能制造更强的逃避和自我辩护。'
+      ])
+    },
+    {
+      code: 'excitement',
+      label: '兴奋',
+      trigger: '愿望实现、获得奖励、发现新鲜事物、得到重要认可、期待即将实现或突然出现好消息时触发。',
+      body: createDefaultScenarioBody([
+        '兴奋情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 分享（share）：第一时间寻找某个人分享消息、展示成果或邀请别人一起参与。',
+        '- 行动（act）：兴奋直接转化为行动，立刻开始尝试、准备、探索或推进相关计划。',
+        '- 庆祝（celebrate）：暂时放下其他事务，通过明显的庆祝行为表达喜悦。',
+        '- 克制（contain）：内心明显兴奋，但因为身份、环境或性格原因努力维持平静，只从细微动作中泄露情绪。',
+        '兴奋不仅影响语言，也应该改变角色接下来愿意做什么。'
+      ])
+    },
+    {
+      code: 'fatigue',
+      label: '疲惫',
+      trigger: '长时间劳动、缺乏睡眠、持续赶路、连续战斗、精神消耗或长期承担高负荷任务时触发。',
+      body: createDefaultScenarioBody([
+        '疲惫情境下，角色通常在四类反应间选择；只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项，强度统一取 low / medium / high 三档：',
+        '- 休息（rest）：降低当前活动强度，寻找能够恢复体力或精神的方式。',
+        '- 强撑（push）：因为责任、目标或紧迫性继续行动，但效率、耐心和动作质量逐渐下降。',
+        '- 简化（simplify）：主动减少非必要行动、交流和决策，只处理最重要的问题。',
+        '- 烦躁（irritable）：疲劳降低情绪控制能力，对小问题表现出比平时更明显的不耐烦和易怒。',
+        '疲惫不是单纯降低数值，而应该实际改变角色的决策方式和行为优先级。'
+      ])
     }
   ],
   tools: DEFAULT_REPLY_PLAN_ORCHESTRATOR_TOOLS

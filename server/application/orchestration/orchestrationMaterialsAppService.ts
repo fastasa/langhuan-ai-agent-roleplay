@@ -15,6 +15,25 @@ const text = (value: unknown, max = 1000) => String(value ?? '').trim().slice(0,
 const nowIso = () => new Date().toISOString()
 const stableId = (prefix: string, value: string) => `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 24)}`
 
+function normalizeDependencySnapshotJson(value: unknown): string {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+  const rawValues = source.values && typeof source.values === 'object' && !Array.isArray(source.values)
+    ? source.values as Record<string, unknown>
+    : {}
+  const values: Record<string, string | number | boolean | null> = {}
+  for (const rawKey of Object.keys(rawValues).sort().slice(0, 48)) {
+    const key = text(rawKey, 80)
+    const raw = rawValues[rawKey]
+    if (!key || !['string', 'number', 'boolean'].includes(typeof raw) && raw !== null) continue
+    if (typeof raw === 'number' && !Number.isFinite(raw)) continue
+    values[key] = typeof raw === 'string' ? text(raw, 500) : raw as number | boolean | null
+  }
+  const fingerprint = text(source.fingerprint, 200)
+  return JSON.stringify({ ...(fingerprint ? { fingerprint } : {}), values })
+}
+
 function assertVersion(value: unknown, currentVersion: number) {
   const expected = Number(value)
   if (!Number.isInteger(expected) || expected < 0) return fail(400, 'expectedVersion 必须是非负整数')
@@ -98,6 +117,7 @@ export function createOrchestrationMaterialsAppService(repository: Repository = 
         sessionId: context.sessionId, worldId: context.worldId, scenarioCode,
         scenarioLabel: text(input.scenarioLabel, 120), scenarioSummary: text(input.scenarioSummary, 300),
         anchorMessageId: text(input.anchorMessageId, 160), sourceArtifactId: text(input.sourceArtifactId, 160),
+        dependencySnapshotJson: normalizeDependencySnapshotJson(input.dependencySnapshot),
         version: current ? current.version + 1 : 1,
         source: text(input.source, 80) || 'director_artifact',
         createdAt: current?.createdAt || timestamp, updatedAt: timestamp

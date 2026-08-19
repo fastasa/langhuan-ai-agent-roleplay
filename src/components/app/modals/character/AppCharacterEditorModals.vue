@@ -3,115 +3,40 @@
     :open="state.showAddCharacter.value && !newCharacterManualDialogOpen"
     title="新建角色"
     subtitle="先选择创建方式"
+    :title-icon-src="titleFeatherIconUrl"
+    title-icon-alt=""
     size="lg"
     :z-index="13055"
     body-compact
     @cancel="closeNewCharacterFlow"
   >
     <div class="new-character-flow">
-      <AppStepper
-        v-model="newCharacterStep"
-        :steps="newCharacterStepperSteps"
-        hide-footer
-        disable-step-indicators
-      >
-        <template #mode>
-          <div class="new-character-choice-grid">
-            <button
-              type="button"
-              class="new-character-choice"
-              :class="{ active: newCharacterMode === 'ai' }"
-              @click="selectNewCharacterMode('ai')"
-            >
-              <span>AI 生成角色</span>
-              <small>先写一句角色方向，再复制提示词给外部 AI。</small>
-            </button>
-            <button
-              type="button"
-              class="new-character-choice"
-              :class="{ active: newCharacterMode === 'manual' }"
-              @click="selectNewCharacterMode('manual')"
-            >
-              <span>手动填写</span>
-              <small>进入角色填写表单。</small>
-            </button>
-          </div>
-        </template>
-
-        <template #brief>
-          <label class="new-character-field">
-            <span>简要角色描述</span>
-            <textarea
-              v-model="newCharacterBrief"
-              rows="7"
-              maxlength="1200"
-              placeholder="例如：来自雨城旧档案馆的年轻修复师，记忆力异常好，表面温和，实际很难信任别人。"
-            ></textarea>
-          </label>
-          <div class="new-character-field-count">{{ newCharacterBrief.length }}/1200</div>
-        </template>
-
-        <template #generate>
-          <div class="new-character-generate-panel">
-            <button
-              type="button"
-              class="new-character-generate-action"
-              :disabled="!canRunNewCharacterAgent"
-              @click="generateNewCharacterWithAgent"
-            >
-              <span>{{ newCharacterGenerating ? '生成中...' : '琅嬛 agent 生成' }}</span>
-              <small>{{ newCharacterGenerating ? '正在调用高量模型' : '调用高量模型并直接创建正式角色' }}</small>
-            </button>
-            <button
-              type="button"
-              class="new-character-generate-action new-character-generate-action--primary"
-              :class="{ 'new-character-generate-action--copied': newCharacterPromptCopied }"
-              :disabled="!canCopyNewCharacterPrompt"
-              @click="copyNewCharacterPrompt"
-            >
-              <span>{{ newCharacterPromptCopied ? '已复制' : '复制提示词' }}</span>
-              <small>{{ newCharacterPromptCopied ? '复制成功，可以去导入外部 AI 返回的 Markdown。' : '复制后交给外部 AI 补全角色核心单位。' }}</small>
-            </button>
-          </div>
-          <div
-            v-if="newCharacterPromptCopied"
-            class="new-character-copy-status"
-            role="status"
-            aria-live="polite"
-          >
-            提示词已复制，可以进入导入步骤
-          </div>
-        </template>
-
-        <template #import>
-          <div class="new-character-import-panel">
-            <p>把外部 AI 返回的角色 Markdown 放进剪贴板，然后从这里导入并新建正式角色。</p>
-            <button
-              type="button"
-              class="new-character-import-action"
-              :disabled="newCharacterImporting"
-              @click="importNewCharacterFromClipboard"
-            >
-              {{ newCharacterImporting ? '导入中...' : '从剪贴板导入并新建角色' }}
-            </button>
-          </div>
-        </template>
-      </AppStepper>
+      <div class="new-character-choice-grid">
+        <button
+          type="button"
+          class="new-character-choice"
+          :class="{ active: newCharacterMode === 'ai' }"
+          @click="selectNewCharacterMode('ai')"
+        >
+          <span>AI 生成角色</span>
+          <small>进入星依浮坞，接着描述你想创建的角色。</small>
+        </button>
+        <button
+          type="button"
+          class="new-character-choice"
+          :class="{ active: newCharacterMode === 'manual' }"
+          @click="selectNewCharacterMode('manual')"
+        >
+          <span>手动填写</span>
+          <small>进入角色填写表单。</small>
+        </button>
+      </div>
     </div>
 
     <template #actions>
-      <button
-        v-if="newCharacterStep > 1"
-        type="button"
-        class="new-character-flow-action new-character-flow-action--secondary"
-        @click="goBackNewCharacterStep"
-      >
-        上一步
-      </button>
-      <span v-else aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
       <div class="new-character-flow-actions__right">
         <button
-          v-if="newCharacterStep < 3"
           type="button"
           class="new-character-flow-action new-character-flow-action--secondary"
           @click="closeNewCharacterFlow"
@@ -119,24 +44,12 @@
           取消
         </button>
         <button
-          v-else-if="newCharacterStep === 3"
-          type="button"
-          class="new-character-flow-action new-character-flow-action--secondary"
-          :disabled="!canCopyNewCharacterPrompt"
-          @click="copyNewCharacterPrompt"
-        >
-          复制
-        </button>
-        <button v-else type="button" class="new-character-flow-action new-character-flow-action--secondary" @click="closeNewCharacterFlow">
-          关闭
-        </button>
-        <button
           type="button"
           class="new-character-flow-action new-character-flow-action--primary"
           :disabled="newCharacterNextDisabled"
           @click="goNextNewCharacterStep"
         >
-          {{ newCharacterPrimaryActionText }}
+          下一步
         </button>
       </div>
     </template>
@@ -146,6 +59,8 @@
     :open="state.showAddCharacter.value && newCharacterManualDialogOpen"
     title="新建角色"
     subtitle="优先填写必要信息，更多设定可逐步展开"
+    :title-icon-src="titleFeatherIconUrl"
+    title-icon-alt=""
     size="xl"
     :z-index="13060"
     :form="state.newCharForm"
@@ -189,6 +104,8 @@
     :open="Boolean(state.showCharacterEditor.value && safeCurrentCharacter)"
     :title="`编辑角色资料: ${safeCurrentCharacter?.name || ''}`"
     subtitle="基础资料与深度设定"
+    :title-icon-src="titleFeatherIconUrl"
+    title-icon-alt=""
     size="xl"
     :z-index="13060"
     :form="state.charEditForm"
@@ -343,7 +260,6 @@ import { computed, onBeforeUnmount, reactive, ref, unref, watch } from 'vue'
 import { API } from '../../../../config/api'
 import AppFormDialog from '../../../common/AppFormDialog.vue'
 import AppConfirmDialog from '../../../common/AppConfirmDialog.vue'
-import AppStepper, { type AppStepperStep } from '../../../common/AppStepper.vue'
 import CharacterProfileDialog from './CharacterProfileDialog.vue'
 import CharacterSnapshotSection from './CharacterSnapshotSection.vue'
 import PersonalityTrainingWorkbench from './personalityTraining/PersonalityTrainingWorkbench.vue'
@@ -357,22 +273,19 @@ import {
 } from '../../../../app/personalityTrainingWorkflow'
 import type { createCharacterEditorModalState } from '../../../../composables/app/modalState/createCharacterEditorModalState'
 import { readImageInputAsDataUrl } from '../../../../utils/photoFile'
-import { parseCharacterCoreMarkdown } from '../../../../app/characterCoreMarkdownTransfer'
-import {
-  buildLanghuanAgentCharacterCorePrompt,
-  runLanghuanAgentCharacterCore
-} from '../../../../app/langhuanAgentAssist'
+import { runLanghuanAgentCharacterCore } from '../../../../app/langhuanAgentAssist'
 import {
   buildCharacterBrainSeedChanges,
-  parseCharacterBrainSeedMarkdown,
   type CharacterBrainSeed
 } from '../../../../app/characterBrainSeedFromGeneration'
 import { registerXingyiFunctionProvider } from '../../../../app/xingyiFunctionBridge'
+import { requestXingyiDockOpen } from '../../../../app/xingyiDockOpenRequest'
 import { useCharacterStore } from '../../../../stores/characterStore'
 import { useChatStore } from '../../../../stores/chatStore'
 import { useSettingStore } from '../../../../stores/settingStore'
 import { useAI } from '../../../../composables/useAI'
 import { useWorkspaceRuntimeStore } from '../../../../app/workspaceRuntimeStore'
+import titleFeatherIconUrl from '../../../../assets/illustrations/new-character-feather-pen.png'
 import { applyCharacterSnapshotState } from '../../../../../shared/characterSnapshotState'
 import {
   cleanupCharacterSnapshotRecords,
@@ -428,37 +341,14 @@ const modelLoading = reactive({ new: false, edit: false })
 const photoCropOpen = ref(false)
 const photoCropSource = ref('')
 const photoCropTarget = ref<'new' | 'edit'>('new')
-const newCharacterStep = ref(1)
 const newCharacterMode = ref<'ai' | 'manual' | ''>('')
-const newCharacterBrief = ref('')
 const newCharacterManualDialogOpen = ref(false)
-const newCharacterPromptCopied = ref(false)
-const newCharacterImporting = ref(false)
 const newCharacterGenerating = ref(false)
 const roleModelOptions = reactive<{ new: string[]; edit: string[] }>({
   new: [],
   edit: []
 })
-const newCharacterStepperSteps: AppStepperStep[] = [
-  { key: 'mode', label: '方式' },
-  { key: 'brief', label: '描述' },
-  { key: 'generate', label: '生成' },
-  { key: 'import', label: '导入' }
-]
-
-const canCopyNewCharacterPrompt = computed(() => Boolean(newCharacterBrief.value.trim()))
-const canRunNewCharacterAgent = computed(() => Boolean(newCharacterBrief.value.trim()) && !newCharacterGenerating.value)
-const newCharacterNextDisabled = computed(() => {
-  if (newCharacterStep.value === 1) return !newCharacterMode.value
-  if (newCharacterStep.value === 2) return !newCharacterBrief.value.trim()
-  if (newCharacterStep.value === 3) return !newCharacterPromptCopied.value
-  return false
-})
-const newCharacterPrimaryActionText = computed(() => {
-  if (newCharacterStep.value === 3) return newCharacterPromptCopied.value ? '去导入' : '复制后继续'
-  if (newCharacterStep.value === newCharacterStepperSteps.length) return '关闭'
-  return '下一步'
-})
+const newCharacterNextDisabled = computed(() => !newCharacterMode.value)
 
 const safeCurrentCharacter = computed(() => {
   const currentCharacterRef = state?.currentCharacter
@@ -768,13 +658,8 @@ function openCharAvatarPicker() {
 }
 
 function resetNewCharacterFlow() {
-  newCharacterStep.value = 1
   newCharacterMode.value = ''
-  newCharacterBrief.value = ''
   newCharacterManualDialogOpen.value = false
-  newCharacterPromptCopied.value = false
-  newCharacterImporting.value = false
-  newCharacterGenerating.value = false
 }
 
 function closeNewCharacterFlow() {
@@ -786,54 +671,21 @@ function selectNewCharacterMode(mode: 'ai' | 'manual') {
   newCharacterMode.value = mode
 }
 
-function goBackNewCharacterStep() {
-  newCharacterStep.value = Math.max(1, newCharacterStep.value - 1)
-}
-
 function returnToNewCharacterModeStep() {
   newCharacterManualDialogOpen.value = false
-  newCharacterStep.value = 1
   newCharacterMode.value = ''
 }
 
 function goNextNewCharacterStep() {
-  if (newCharacterStep.value === 1 && newCharacterMode.value === 'manual') {
+  if (newCharacterMode.value === 'manual') {
     newCharacterManualDialogOpen.value = true
     return
   }
-  if (newCharacterStep.value < newCharacterStepperSteps.length) {
-    newCharacterStep.value += 1
-    return
+  if (newCharacterMode.value === 'ai') {
+    state.showAddCharacter.value = false
+    resetNewCharacterFlow()
+    requestXingyiDockOpen({ draft: '帮我创建一个角色：' })
   }
-  closeNewCharacterFlow()
-}
-
-function buildNewCharacterPromptText() {
-  return buildLanghuanAgentCharacterCorePrompt(newCharacterBrief.value.trim())
-}
-
-async function writeClipboardText(text: string) {
-  if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return false
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function copyNewCharacterPrompt() {
-  if (!canCopyNewCharacterPrompt.value) return
-  const ok = await writeClipboardText(buildNewCharacterPromptText())
-  if (ok) newCharacterPromptCopied.value = true
-  state.toast(ok ? '生成角色提示词已复制' : '当前环境无法写入剪贴板', ok ? 'success' : 'error')
-}
-
-async function readClipboardText() {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-    throw new Error('当前环境无法读取剪贴板')
-  }
-  return await navigator.clipboard.readText()
 }
 
 function applyCharacterCoreChangesToNewForm(changes: Record<string, unknown>) {
@@ -876,37 +728,8 @@ function applyCharacterCoreChangesToNewForm(changes: Record<string, unknown>) {
   }
 }
 
-function applyImportedCharacterCoreToNewForm(markdown: string) {
-  applyCharacterCoreChangesToNewForm(parseCharacterCoreMarkdown(markdown))
-}
-
-async function importNewCharacterFromClipboard() {
-  if (newCharacterImporting.value) return
-  newCharacterImporting.value = true
-  try {
-    const markdown = await readClipboardText()
-    applyImportedCharacterCoreToNewForm(markdown)
-    const createdId = await state.addNewCharacter()
-    if (!state.showAddCharacter.value) resetNewCharacterFlow()
-    // 外部 AI 产物若带大脑种子段落（出生日期/灵魂/关键经历）则一并写入；旧格式没有种子段时静默跳过
-    if (createdId) {
-      let seed: CharacterBrainSeed | null = null
-      try {
-        seed = parseCharacterBrainSeedMarkdown(markdown)
-      } catch {
-        seed = null
-      }
-      if (seed) await applyBrainSeedToCreatedCharacter(String(createdId), seed)
-    }
-  } catch (error) {
-    state.toast(`导入角色失败：${error instanceof Error ? error.message : String(error)}`, 'error')
-  } finally {
-    newCharacterImporting.value = false
-  }
-}
-
 /** 创建成功后把大脑种子写进新角色正式真值（灵魂节点+出生日期+轨迹日桠/事件），返回汇报片段。
- *  直接落正式、不走待确认（2026-07-08 用户拍板）；agent 生成与剪贴板导入两条创建链共用。 */
+ *  直接落正式、不走待确认（2026-07-08 用户拍板）。 */
 async function applyBrainSeedToCreatedCharacter(createdId: string, seed: CharacterBrainSeed): Promise<string> {
   const created = charStore.getCharacter(createdId)
   if (!created) throw new Error('新角色创建后读取失败，无法写入灵魂/轨迹')
@@ -980,17 +803,6 @@ async function runNewCharacterAgentCore(brief: string): Promise<{ ok: boolean; m
       error
     })
     return { ok: false, message: `角色生成失败：${error instanceof Error ? error.message : String(error)}` }
-  }
-}
-
-async function generateNewCharacterWithAgent() {
-  if (!canRunNewCharacterAgent.value) return
-  newCharacterGenerating.value = true
-  try {
-    const result = await runNewCharacterAgentCore(newCharacterBrief.value.trim())
-    if (!result.ok) state.toast(result.message, 'error')
-  } finally {
-    newCharacterGenerating.value = false
   }
 }
 
@@ -1138,10 +950,6 @@ watch(() => state.showAddCharacter.value, (open) => {
   }
 })
 
-watch(newCharacterBrief, () => {
-  newCharacterPromptCopied.value = false
-})
-
 watch(() => state.showCharacterEditor.value, (open) => {
   if (open) {
     editPersonalityModelPath.value = String((safeCurrentCharacter.value as Record<string, unknown> | null)?.personalityModelPath || '')
@@ -1242,8 +1050,7 @@ watch(() => state.charEditForm.defaultPreset, () => {
   gap: 12px;
 }
 
-.new-character-choice,
-.new-character-generate-action {
+.new-character-choice {
   display: grid;
   gap: 7px;
   min-height: 118px;
@@ -1261,99 +1068,14 @@ watch(() => state.charEditForm.defaultPreset, () => {
   background: color-mix(in srgb, var(--morandi-accent) 10%, var(--morandi-card));
 }
 
-.new-character-choice span,
-.new-character-generate-action span {
+.new-character-choice span {
   font-size: 0.98rem;
   font-weight: 700;
 }
 
-.new-character-choice small,
-.new-character-generate-action small {
+.new-character-choice small {
   color: var(--morandi-text-light);
   line-height: 1.55;
-}
-
-.new-character-field {
-  display: grid;
-  gap: 8px;
-  color: var(--morandi-text);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.new-character-field textarea {
-  width: 100%;
-  resize: vertical;
-  border: 1px solid color-mix(in srgb, var(--morandi-border) 80%, transparent);
-  border-radius: 8px;
-  background: var(--langhuan-dialog-input-bg, #ffffff);
-  color: var(--morandi-text);
-  line-height: 1.65;
-  padding: 12px;
-}
-
-.new-character-field-count {
-  margin-top: 6px;
-  color: var(--morandi-text-light);
-  font-size: 0.82rem;
-  text-align: right;
-}
-
-.new-character-generate-panel {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.new-character-generate-action:disabled {
-  cursor: default;
-  opacity: 0.58;
-}
-
-.new-character-generate-action--primary:not(:disabled) {
-  border-color: rgba(126, 167, 157, 0.76);
-  background: color-mix(in srgb, var(--morandi-accent) 12%, var(--morandi-card));
-}
-
-.new-character-generate-action--copied:not(:disabled) {
-  border-color: rgba(105, 145, 133, 0.9);
-  background: color-mix(in srgb, var(--morandi-accent) 14%, var(--morandi-card));
-}
-
-.new-character-copy-status {
-  margin-top: 12px;
-  border-left: 2px solid rgba(105, 145, 133, 0.72);
-  padding-left: 10px;
-  color: var(--morandi-accent);
-  font-size: 0.84rem;
-  font-weight: 700;
-}
-
-.new-character-import-panel {
-  display: grid;
-  gap: 14px;
-  color: var(--morandi-text);
-}
-
-.new-character-import-panel p {
-  margin: 0;
-  line-height: 1.65;
-}
-
-.new-character-import-action {
-  min-height: 54px;
-  border: 1px solid rgba(126, 167, 157, 0.66);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--morandi-accent) 12%, var(--morandi-card));
-  color: var(--morandi-text);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.new-character-import-action:disabled {
-  cursor: default;
-  opacity: 0.55;
 }
 
 .new-character-flow-actions__right {
@@ -1389,8 +1111,7 @@ watch(() => state.charEditForm.defaultPreset, () => {
 }
 
 @media (max-width: 720px) {
-  .new-character-choice-grid,
-  .new-character-generate-panel {
+  .new-character-choice-grid {
     grid-template-columns: 1fr;
   }
 }

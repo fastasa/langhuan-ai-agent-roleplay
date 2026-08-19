@@ -157,6 +157,7 @@ function repairLegacyChatTarget(targetId: string, ownerUserId?: string, workspac
       lastSummaryTime: legacySession.last_summary_time || '',
       loadedSummaryIds: legacySession.loaded_summary_ids || '[]',
       contextSummary: legacySession.context_summary || '',
+      contextSummaryMessageId: Number(legacySession.context_summary_message_id || 0),
       capsResidueStateJson: '{}',
       updatedAt: legacySession.updated_at || null,
       virtualSceneName: legacySession.virtual_scene_name || '',

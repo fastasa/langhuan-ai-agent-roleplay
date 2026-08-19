@@ -3,7 +3,6 @@ import {
   buildPersonalityRerankerPairInputs,
   buildReplyPlanOrchestratorPrompt,
   buildReviewPlanCandidatesInput,
-  createJoyScenarioBody,
   createPressureScenarioBody,
   deriveStrategyMatrixFromToolCalls,
   getReplyPlanToolManual,
@@ -14,6 +13,7 @@ import {
   readReplyPlanScenarioBody,
   readReplyPlanScenarioMountedPromptDigest,
   validateReplyPlanOrchestration,
+  DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG,
   DEFAULT_REPLY_PLAN_ORCHESTRATOR_TOOLS
 } from '../../../src/app/personalityPlanOrchestrator.ts'
 
@@ -33,7 +33,13 @@ function pressureGenerateCalls() {
 }
 
 describe('personalityPlanOrchestrator', () => {
-  it('压力 / 喜悦默认情境正文是自然语言并覆盖各反应类别', () => {
+  it('默认 seed 包含 10 个情境，并让每种特殊状态映射到明确的决策分叉', () => {
+    const scenarios = DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG.scenarios
+    expect(scenarios.map((scenario) => scenario.code)).toEqual([
+      'pressure', 'nsfw', 'anger', 'awkward', 'sadness',
+      'fear', 'jealousy', 'guilt', 'excitement', 'fatigue'
+    ])
+
     const pressure = createPressureScenarioBody()
     expect(pressure).toContain('进攻性（aggressive）')
     expect(pressure).toContain('防御性（defensive）')
@@ -41,11 +47,28 @@ describe('personalityPlanOrchestrator', () => {
     expect(pressure).toContain('逃避（avoid）')
     expect(pressure).toContain('low / medium / high')
 
-    const joy = createJoyScenarioBody()
-    expect(joy).toContain('分享（share）')
-    expect(joy).toContain('明亮化（brighten）')
-    expect(joy).toContain('靠近（approach）')
-    expect(joy).toContain('very_high')
+    const expectedStrategies = {
+      nsfw: ['主动（initiate）', '回应（reciprocate）', '克制（restrain）', '拒绝（refuse）'],
+      anger: ['爆发（confront）', '压抑（suppress）', '疏离（withdraw）', '转化（redirect）'],
+      awkward: ['掩饰（cover）', '转移（deflect）', '自嘲（self_deprecate）', '僵住（freeze）'],
+      sadness: ['倾诉（seek_support）', '独处（withdraw）', '强撑（mask）', '沉浸（grieve）'],
+      fear: ['对抗（fight）', '逃离（flight）', '僵住（freeze）', '求援（seek_help）'],
+      jealousy: ['争取（compete）', '试探（probe）', '掩饰（hide）', '疏远（withdraw）'],
+      guilt: ['补偿（repair）', '坦白（confess）', '逃避（avoid）', '合理化（justify）'],
+      excitement: ['分享（share）', '行动（act）', '庆祝（celebrate）', '克制（contain）'],
+      fatigue: ['休息（rest）', '强撑（push）', '简化（simplify）', '烦躁（irritable）']
+    }
+    for (const [code, strategies] of Object.entries(expectedStrategies)) {
+      const scenario = scenarios.find((item) => item.code === code)
+      expect(scenario).toBeTruthy()
+      expect(scenario.body).toContain('只调用一次 generatePlanBatch')
+      expect(scenario.body).toContain('low / medium / high')
+      expect(scenario.body).toContain('planPrompt 只写给计划模型的第三视角行动计划任务说明')
+      for (const strategy of strategies) expect(scenario.body).toContain(strategy)
+    }
+    expect(scenarios.find((scenario) => scenario.code === 'nsfw').trigger).toContain('仅成年角色')
+    expect(scenarios.find((scenario) => scenario.code === 'nsfw').body).toContain('不因进入 NSFW 情境就自动产生欲望或同意')
+    expect(scenarios.some((scenario) => scenario.code === 'joy')).toBe(false)
   })
 
   it('strategyMatrix 由 generatePlanBatch 工具调用派生', () => {
@@ -171,7 +194,9 @@ describe('personalityPlanOrchestrator', () => {
     expect(system).toContain('ReplyPlanOrchestrator')
     expect(system).toContain('可用情境')
     expect(system).toContain('pressure（压力）')
-    expect(system).toContain('joy（喜悦）')
+    expect(system).toContain('nsfw（NSFW）')
+    expect(system).toContain('excitement（兴奋）')
+    expect(system).toContain('fatigue（疲惫）')
     // 批次 2 多轮渐进式：只注 trigger 触发描述，body 正文不再全量注入
     expect(system).toContain('被外部观察时触发')               // 来自 pressure 的 trigger
     expect(system).not.toContain('进攻性（aggressive）')        // body 正文不再注入

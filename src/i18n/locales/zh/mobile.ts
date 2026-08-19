@@ -106,7 +106,7 @@ export const mobile = {
     apiSummary: '{mode} · {count} 个预设',
     currentVersion: '当前'
   },
-  // 移动端文档库工作区（文档库标题复用 sidebar.navDocs、提示词 tab 复用 docLibrary.topbar.promptTitle、关系视图复用 docLibrary.relation.viewLabel、编辑复用 common.edit、打开复用 chatList.open）
+  // 移动端文档库工作区（文档库标题复用 sidebar.navDocs、两类提示词 tab 复用 docLibrary.topbar 标题、关系视图复用 docLibrary.relation.viewLabel、编辑复用 common.edit、打开复用 chatList.open）
   docWs: {
     aria: '移动端文档库',
     tabsAria: '文档库分区',
@@ -191,7 +191,10 @@ export const mobile = {
     loadModels: '加载模型',
     params: '参数',
     catalogEmbedding: '编目（嵌入）',
-    catalogHint: '向量召回/取料嵌入：琅嬛默认嵌入预设（服务端统一管理）',
+    catalogHint: '向量召回/取料使用；请选择支持 embeddings 的本地 API 预设',
+    embeddingPresetPlaceholder: '请选择嵌入预设',
+    embeddingModelPlaceholder: '填写嵌入模型名',
+    embeddingDimensions: '向量维度',
     recallWriteStrategy: '召回与写入策略',
     recallWriteHint: '只配置策略与审查参数',
     intentSnapshot: '意图快照',
@@ -224,6 +227,10 @@ export const mobile = {
     reasoningSummaryUnavailable: '思考摘要（AGY 暂不回传）',
     reasoningSummaryOff: '不返回',
     reasoningSummaryOn: '返回摘要',
+    reasoningEffort: '努力程度',
+    followModelDefault: '跟随模型默认',
+    followModelDefaultWithValue: '跟随模型默认（{effort}）',
+    savedEffort: '已保存档位',
     fastService: '快速服务',
     fastServiceHint: '使用当前 Codex 模型提供的快速服务档',
     subtitleAgent: '模型用途、召回与写入',

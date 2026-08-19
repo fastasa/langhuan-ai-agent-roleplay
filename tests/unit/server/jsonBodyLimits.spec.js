@@ -43,6 +43,8 @@ describe('json body limits', () => {
     expect(DEFAULT_JSON_BODY_LIMIT).toBe('256kb')
     expect(SMALL_JSON_BODY_LIMIT).toBe('256kb')
     expect(shouldUseLargeJsonBodyLimit(request('POST', '/api/ai/chat'))).toBe(false)
+    expect(shouldUseMediumJsonBodyLimit(request('POST', '/api/ai/chat'))).toBe(true)
+    expect(shouldUseMediumJsonBodyLimit(request('POST', '/api/ai/models'))).toBe(false)
     expect(shouldUseLargeJsonBodyLimit(request('PUT', '/api/data/tasks/task_1'))).toBe(false)
     expect(shouldUseLargeJsonBodyLimit(request('POST', '/api/data/chat-sessions/session_1/recall-activity-logs'))).toBe(false)
     expect(shouldUseLargeJsonBodyLimit(request('GET', '/api/data/restore'))).toBe(false)
@@ -68,6 +70,14 @@ describe('json body limits', () => {
     expect(shouldUseMediumJsonBodyLimit(request('POST', '/api/data/chat-sessions/session_1/status-assets'))).toBe(true)
     expect(shouldUseLargeJsonBodyLimit(request('POST', '/api/data/chat-sessions/session_1/status-assets'))).toBe(false)
     expect(shouldUseMediumJsonBodyLimit(request('GET', '/api/data/chat-sessions/session_1/status-assets'))).toBe(false)
+    expect(shouldUseMediumJsonBodyLimit(request('POST', '/api/data/chat-sessions/session_1/prompt-logs'))).toBe(true)
+    expect(shouldUseMediumJsonBodyLimit(request('POST', '/api/data/chat/char_1/prompt-logs'))).toBe(true)
+    expect(shouldUseLargeJsonBodyLimit(request('POST', '/api/data/chat-sessions/session_1/prompt-logs'))).toBe(false)
+    expect(shouldUseMediumJsonBodyLimit(request('GET', '/api/data/chat-sessions/session_1/prompt-logs'))).toBe(false)
+    const journalPath = '/api/data/agent-runtime-journal/runs/run_1/events'
+    expect(shouldUseMediumJsonBodyLimit(request('POST', journalPath))).toBe(true)
+    expect(shouldUseLargeJsonBodyLimit(request('POST', journalPath))).toBe(false)
+    expect(shouldUseMediumJsonBodyLimit(request('GET', journalPath))).toBe(false)
     const questionnairePath = '/api/data/characters/char_1/personality-training/datasets/dataset_1/questionnaire'
     expect(shouldUseMediumJsonBodyLimit(request('PUT', questionnairePath))).toBe(true)
     expect(shouldUseLargeJsonBodyLimit(request('PUT', questionnairePath))).toBe(false)
@@ -84,6 +94,24 @@ describe('json body limits', () => {
       const body = JSON.stringify({ value: 'x'.repeat(300 * 1024) })
       const response = await jsonRequest(baseUrl, '/api/data/tasks/task_1', body)
       expect(response.status).toBe(413)
+    })
+  })
+
+  it('accepts AI chat envelopes above 256kb but keeps other AI routes small', async () => {
+    const app = express()
+    app.use('/api/ai', createJsonBodyParser())
+    app.post('/api/ai/chat', (req, res) => res.json({ ok: true, length: req.body.messages[0].content.length }))
+    app.post('/api/ai/models', (_req, res) => res.json({ ok: true }))
+    app.use(handleJsonBodyParserError)
+
+    await withServer(app, async (baseUrl) => {
+      const body = JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(600 * 1024) }] })
+      const chatResponse = await jsonRequest(baseUrl, '/api/ai/chat', body, { method: 'POST' })
+      expect(chatResponse.status).toBe(200)
+      await expect(chatResponse.json()).resolves.toEqual({ ok: true, length: 600 * 1024 })
+
+      const modelsResponse = await jsonRequest(baseUrl, '/api/ai/models', body, { method: 'POST' })
+      expect(modelsResponse.status).toBe(413)
     })
   })
 
@@ -119,6 +147,21 @@ describe('json body limits', () => {
     })
   })
 
+  it('parses journal envelopes above 256kb on only the journal POST route', async () => {
+    const app = express()
+    app.use('/api/data', createJsonBodyParser())
+    const path = '/api/data/agent-runtime-journal/runs/run_1/events'
+    app.post(path, (req, res) => res.json({ ok: true, length: req.body.payload.text.length }))
+    app.use(handleJsonBodyParserError)
+
+    await withServer(app, async (baseUrl) => {
+      const body = JSON.stringify({ payload: { text: 'x'.repeat(300 * 1024) } })
+      const response = await jsonRequest(baseUrl, path, body, { method: 'POST' })
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({ ok: true, length: 300 * 1024 })
+    })
+  })
+
   it('accepts a multi-hundred-questionnaire snapshot above 256kb on only its save route', async () => {
     const app = express()
     app.use('/api/data', createJsonBodyParser())
@@ -129,6 +172,21 @@ describe('json body limits', () => {
     await withServer(app, async (baseUrl) => {
       const body = JSON.stringify({ value: 'x'.repeat(600 * 1024) })
       const response = await jsonRequest(baseUrl, path, body)
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({ ok: true, length: 600 * 1024 })
+    })
+  })
+
+  it('accepts a complete final prompt log above 256kb', async () => {
+    const app = express()
+    app.use('/api/data', createJsonBodyParser())
+    const path = '/api/data/chat-sessions/session_1/prompt-logs'
+    app.post(path, (req, res) => res.json({ ok: true, length: req.body.finalPrompt.length }))
+    app.use(handleJsonBodyParserError)
+
+    await withServer(app, async (baseUrl) => {
+      const body = JSON.stringify({ finalPrompt: 'x'.repeat(600 * 1024), promptBlocks: [] })
+      const response = await jsonRequest(baseUrl, path, body, { method: 'POST' })
       expect(response.status).toBe(200)
       await expect(response.json()).resolves.toEqual({ ok: true, length: 600 * 1024 })
     })

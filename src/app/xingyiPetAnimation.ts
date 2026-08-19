@@ -19,7 +19,7 @@ export type XingyiPetManifest = {
     src: string
     width: number
     height: number
-    format: 'svg'
+    format: 'webp'
   }
   fallbackSrc: string
   animations: Record<string, XingyiPetAnimation>
@@ -32,7 +32,7 @@ export function parseXingyiPetManifest(input: unknown): XingyiPetManifest | null
   if (!isRecord(input.atlas)) return null
 
   const atlas = input.atlas
-  if (!isSafePetAssetPath(atlas.src) || atlas.format !== 'svg') return null
+  if (!isSafePetAssetPath(atlas.src) || atlas.format !== 'webp') return null
   if (!isPositiveInteger(atlas.width) || !isPositiveInteger(atlas.height)) return null
   if (!isSafePetAssetPath(input.fallbackSrc) || !isRecord(input.animations)) return null
 
@@ -87,7 +87,7 @@ export function parseXingyiPetManifest(input: unknown): XingyiPetManifest | null
       src: atlas.src,
       width: atlas.width,
       height: atlas.height,
-      format: 'svg',
+      format: 'webp',
     },
     fallbackSrc: input.fallbackSrc,
     animations,

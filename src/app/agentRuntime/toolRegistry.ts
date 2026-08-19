@@ -52,6 +52,8 @@ export interface ToolExecutionResult<TDetails extends Record<string, unknown> = 
 export interface ToolDefinition<TArgs extends Record<string, unknown> = Record<string, unknown>> {
   name: string
   brief: string
+  /** Stable model-visible order. Equal/omitted values are deterministically ordered by name. */
+  order?: number
   manual?: string
   schema?: Record<string, unknown>
   execute: (toolCall: ToolCallMessage<TArgs>, ctx: ToolExecutionContext) => Promise<ToolExecutionResult> | ToolExecutionResult
@@ -63,6 +65,13 @@ export interface ToolDefinition<TArgs extends Record<string, unknown> = Record<s
   // null=不钳制，不声明=吃 runtime 默认阈值（DEFAULT_TOOL_RESULT_CLAMP_CHARS）。只影响回灌模型的 messages，
   // 不影响 history/保真事件（那两条路径拿到的都是钳制前全文，见 runtime.ts toolResultToChatMessage）。
   resultClampChars?: number | null
+  /** Per-tool execution deadline. Positive milliseconds override the runtime default; null disables it. */
+  timeoutMs?: number | null
+  /**
+   * Side-effect classification for timeout/recovery safety. false explicitly asserts read-only;
+   * true or omission stays conservative because a non-cooperative timeout cannot prove no write.
+   */
+  mayHaveSideEffects?: boolean
   // 免执行超时标记（2026-07-12 架构审查批B）：true=该工具 execute 不受 runtime 默认单工具超时限制——
   // 用于内部会 await 用户交互（askUser/confirmWrite/confirmStatusScope 等真阻塞通道）或派发子 agent/
   // 长任务（dispatchResearch/dispatchMapWork/consultScript 等）的工具，它们耗时不可预测，不该被判超时打断。
@@ -93,18 +102,27 @@ export class ToolRegistry {
   }
 
   list(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map((definition) => ({ ...definition }))
+    const definitions = Array.from(this.tools.values()).map((definition) => ({ ...definition }))
+    // Existing registries intentionally use insertion order as part of their staged tool envelope.
+    // Opt into canonical order by declaring at least one explicit order; this avoids silently
+    // reshuffling every current Agent while still making the new contract deterministic.
+    return definitions.some(hasExplicitToolOrder)
+      ? definitions.sort(compareToolDefinitions)
+      : definitions
   }
 
   listBriefs(
     activeTools?: string[]
-  ): Array<{ name: string; brief: string; schema?: Record<string, unknown> }> {
+  ): Array<{ name: string; brief: string; order?: number; schema?: Record<string, unknown> }> {
     const allowed = activeTools ? new Set(activeTools) : null
     return this.list()
       .filter((definition) => !allowed || allowed.has(definition.name))
       .map((definition) => ({
         name: definition.name,
         brief: definition.brief,
+        ...(typeof definition.order === 'number' && Number.isFinite(definition.order)
+          ? { order: definition.order }
+          : {}),
         ...(definition.schema ? { schema: definition.schema } : {})
       }))
   }
@@ -123,6 +141,33 @@ export class ToolRegistry {
         recommended: recommended ? recommended.has(definition.name) : false
       }))
   }
+}
+
+function normalizedToolOrder(definition: Pick<ToolDefinition, 'order'>): number {
+  return typeof definition.order === 'number' && Number.isFinite(definition.order)
+    ? definition.order
+    : 0
+}
+
+function hasExplicitToolOrder(definition: Pick<ToolDefinition, 'order'>): boolean {
+  return typeof definition.order === 'number' && Number.isFinite(definition.order)
+}
+
+function compareToolNames(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function compareToolDefinitions(left: ToolDefinition, right: ToolDefinition): number {
+  const orderDelta = normalizedToolOrder(left) - normalizedToolOrder(right)
+  return orderDelta || compareToolNames(left.name, right.name)
+}
+
+function compareToolBriefs(
+  left: { name: string; order?: number },
+  right: { name: string; order?: number }
+): number {
+  const orderDelta = normalizedToolOrder(left) - normalizedToolOrder(right)
+  return orderDelta || compareToolNames(left.name, right.name)
 }
 
 /** R1-B B5（toolsearch 匹配·通用纯函数）：把 query 按空白/常见中英文标点拆词，对每个工具的 name+brief 子串匹配，
@@ -210,9 +255,12 @@ export function canonicalizeToolSchema(value: unknown): unknown {
  * 空工具名直接剔除（不可能注册成空名，见 ToolRegistry.register；这里只是防御）。
  */
 export function toOpenAiTools(
-  briefs: Array<{ name: string; brief: string; schema?: Record<string, unknown> }>
+  briefs: Array<{ name: string; brief: string; order?: number; schema?: Record<string, unknown> }>
 ): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }> {
-  const named = briefs.filter((brief) => String(brief?.name || '').trim())
+  const named = briefs
+    .filter((brief) => String(brief?.name || '').trim())
+    .slice()
+  if (named.some(hasExplicitToolOrder)) named.sort(compareToolBriefs)
   const missing = named.filter((brief) => !hasValidToolSchema(brief)).map((brief) => brief.name)
   if (missing.length && typeof import.meta !== 'undefined' && Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV)) {
     // eslint-disable-next-line no-console
@@ -233,6 +281,16 @@ export function toOpenAiTools(
 /** 工具结果回灌 messages 的默认钳制阈值（2026-07-12 架构审查批B）：单个工具结果整段灌回模型 context
  *  不加限制会撑爆预算、挤走其它信息（真机已见超长检索/体检结果整段回灌）。工具可用 resultClampChars 覆盖。 */
 export const DEFAULT_TOOL_RESULT_CLAMP_CHARS = 12000
+export const DEFAULT_PRESSURE_PRUNE_THRESHOLD_CHARS = 8192
+export const DEFAULT_PRESSURE_PRUNE_HEAD_CHARS = 4096
+export const DEFAULT_PRESSURE_PRUNE_TAIL_CHARS = 1024
+
+export interface ToolResultSurfacePressure {
+  underPressure: boolean
+  thresholdChars?: number
+  headChars?: number
+  tailChars?: number
+}
 
 /** 按工具定义解析本次结果的实际钳制阈值：数字=自定义、null=不钳制、未声明=默认阈值。
  *  找不到工具定义（如 TOOL_NOT_FOUND/BUDGET_EXCEEDED 等 runtime 合成结果）时按默认阈值——这类结果本身很短，钳不到。 */
@@ -246,10 +304,39 @@ export function resolveResultClampChars(definition: ToolDefinition | undefined):
 /** 工具结果正文钳制（只影响回灌模型的 messages，不影响 history/保真事件全文——调用方必须在钳制前完成
  *  那两条路径的写入，见 runtime.ts toolResultToChatMessage 的调用顺序）。超过阈值截断保留头部，
  *  追加中文提示告知已截断+原文长度+改法建议；clampChars=null 或未超限时原样返回。 */
-export function clampToolResultContent(content: string, clampChars: number | null): string {
-  if (clampChars == null || content.length <= clampChars) return content
+export function clampToolResultContent(
+  content: string,
+  clampChars: number | null,
+  pressure?: ToolResultSurfacePressure
+): string {
+  if (clampChars == null) return content
+  if (pressure?.underPressure) {
+    const thresholdChars = positiveIntegerOr(
+      pressure.thresholdChars,
+      DEFAULT_PRESSURE_PRUNE_THRESHOLD_CHARS
+    )
+    // Keep the old head-only clamp for small custom clamps. Pressure pruning is an additional,
+    // explicit mode; it must not silently redefine every existing resultClampChars declaration.
+    if (content.length > thresholdChars) {
+      const requestedHead = positiveIntegerOr(pressure.headChars, DEFAULT_PRESSURE_PRUNE_HEAD_CHARS)
+      const requestedTail = positiveIntegerOr(pressure.tailChars, DEFAULT_PRESSURE_PRUNE_TAIL_CHARS)
+      const retainedBudget = Math.min(clampChars, requestedHead + requestedTail)
+      const tailChars = Math.min(requestedTail, Math.max(1, Math.floor(retainedBudget / 3)))
+      const headChars = Math.min(requestedHead, Math.max(1, retainedBudget - tailChars))
+      const omittedChars = content.length - headChars - tailChars
+      if (omittedChars > 0) {
+        return `${content.slice(0, headChars)}\n\n[工具结果因上下文压力折叠：中间省略 ${omittedChars} 字；完整原文仍保留在运行时历史和事件日志中]\n\n${content.slice(-tailChars)}`
+      }
+    }
+  }
+  if (content.length <= clampChars) return content
   const truncated = content.slice(0, clampChars)
   return `${truncated}\n\n⚠️ 结果过长已在此截断（原文 ${content.length} 字）。请改用更窄的参数重新查询；若当前会话支持 searchDirectorMemory，可用它检索完整原文。`
+}
+
+function positiveIntegerOr(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback
 }
 
 export function makeToolErrorResult(

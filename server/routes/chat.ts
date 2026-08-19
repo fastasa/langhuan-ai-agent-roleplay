@@ -1240,7 +1240,8 @@ router.post('/chat-sessions/:sessionId/messages/:msgId/projection/run', async (r
         // 消耗溯源：批量投影从 body 带 op 单元 id；单条投影不带=服务端并入消息所在轮。
         {
           unitId: String(req.body?.unitId || ''),
-          unitKind: String(req.body?.unitKind || '')
+          unitKind: String(req.body?.unitKind || ''),
+          promptLogMode: req.body?.promptLogMode === 'background' ? 'background' : 'manual'
         }
       ),
       'run message projection failed'

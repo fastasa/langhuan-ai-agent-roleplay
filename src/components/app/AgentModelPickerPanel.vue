@@ -128,10 +128,13 @@ const currentEffortOptions = computed(() => {
   const slotId = props.modelValue.slotId
   const model = configuredModel(slotId)
   const catalog = catalogs.value[slotId] || []
+  const configuredEffort = String(usageConfig(slotId).effort || '').trim()
   const defaultEffort = getModelDefaultReasoningEffort(model, catalog)
-  const defaultLabel = defaultEffort
-    ? t('workspaceAgent.modelPickerDefaultEffortWithValue', { effort: defaultEffort })
-    : t('workspaceAgent.modelPickerDefaultEffort')
+  const defaultLabel = configuredEffort
+    ? t('workspaceAgent.modelPickerSlotEffortWithValue', { effort: configuredEffort })
+    : (defaultEffort
+        ? t('workspaceAgent.modelPickerDefaultEffortWithValue', { effort: defaultEffort })
+        : t('workspaceAgent.modelPickerDefaultEffort'))
   return [
     { value: '', label: defaultLabel },
     ...getModelReasoningEffortOptions(providerType(slotId), model, catalog)

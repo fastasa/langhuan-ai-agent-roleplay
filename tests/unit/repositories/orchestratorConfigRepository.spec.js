@@ -76,7 +76,7 @@ describe('orchestratorConfigRepository·合并生成协议升级门（2026-07-08
     expect(body).toContain('- 甲类。')
   })
 
-  it('默认 seed 情境正文已是 batches 口径（压力/喜悦）', () => {
+  it('默认 seed 的 10 个情境正文已是 batches 口径', () => {
     for (const scenario of DEFAULT_REPLY_PLAN_ORCHESTRATOR_CONFIG.scenarios) {
       expect(scenario.body).toContain('只调用一次 generatePlanBatch，在 batches 数组里为每一类各列一项')
       expect(scenario.body).not.toContain('为每一类调用一次 generatePlanBatch')

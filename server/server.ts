@@ -22,6 +22,7 @@ import workspaceRouter from './routes/workspace.js'
 import aiUsageRouter from './routes/aiUsage.js'
 import personalityRerankerRouter from './routes/personalityReranker.js'
 import xingyiDiaryRouter from './routes/xingyiDiary.js'
+import agentRuntimeJournalRouter from './routes/agentRuntimeJournal.js'
 import { createPixelStudioRouter } from './pixel-studio/routes.js'
 import { attachLocalWorkspace } from './localWorkspace.js'
 import { auditMiddleware } from './middleware/audit.js'
@@ -126,7 +127,7 @@ app.use('/api/', attachLocalWorkspace)
 app.use('/api/', auditMiddleware('api_mutation'))
 app.use('/api/data/restore', operationConcurrencyGate, importByteBudgetGate, scopedJsonBodyParser)
 app.use('/api/data', operationConcurrencyGate, importByteBudgetGate, scopedJsonBodyParser)
-app.use('/api/ai', smallJsonBodyParser)
+app.use('/api/ai', scopedJsonBodyParser)
 app.use('/api/timers', smallJsonBodyParser)
 app.use('/api/weather', smallJsonBodyParser)
 
@@ -159,6 +160,7 @@ app.use('/api/data', resourcesRouter)
 app.use('/api/data', metaRouter)
 app.use('/api/data', personalityRerankerRouter) // 人格模型服务端推理（移动端 / 桌面端带不动时）
 app.use('/api/data', aiUsageRouter)
+app.use('/api/data', agentRuntimeJournalRouter)
 app.use('/api/data', tasksRouter)   // tasks, task-logs, daily-reports 路由
 app.use('/api/timers', timersRouter)
 app.use('/api/weather', weatherRouter)
@@ -250,16 +252,15 @@ const server = app.listen(PORT, HOST, () => {
   logger.system(`琅嬛服务器已启动：http://${HOST}:${PORT}`)
 })
 
-// 处理端口被占用的情况
+// 一键启动器会在进程启动前精确清理配置端口。若这里仍遇到占用，说明清理失败或发生并发抢占；
+// 直接退出并保留一次明确错误，禁止旧版每秒重试造成无限刷屏。
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
-    logger.system(`端口 ${PORT} 被占用，尝试释放...`)
-    // 等待一秒后重试
-    setTimeout(() => {
-      server.close()
-      server.listen(PORT, HOST)
-    }, 1000)
+    logger.error(`端口 ${PORT} 仍被占用，启动失败。请重新运行“启动琅嬛.bat”。`)
+    process.exit(1)
   }
+  logger.error(`服务器监听失败：${err.message}`)
+  process.exit(1)
 })
 
 // 优雅关闭（nodemon 重启前释放端口）。

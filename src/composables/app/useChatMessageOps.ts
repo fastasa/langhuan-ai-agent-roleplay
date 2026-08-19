@@ -57,7 +57,7 @@ import { extractDirectorDirectives } from '../../app/directorDirective'
 import { buildLatestSceneChangePromptNotice } from '../../app/sceneChangePromptNotice'
 import { buildTaskModelAiOptions } from '../../utils/modelTaskTiers'
 import { assemblePromptFromMessages, assemblePromptFromSources, type PromptSource, type PromptSourceKind } from '../../app/promptAssemblyPipeline'
-import { resolveConfiguredReplyPipelineMode, resolveReplyPipelineMode } from '../../app/chatReplyPipelineMode'
+import { resolveReplyPipelineMode } from '../../app/chatReplyPipelineMode'
 import {
   buildProjectionFirstMessageView,
   isProjectionFirstEligibleMessage,
@@ -450,12 +450,9 @@ export function useChatMessageOps({
     const messageKind = String(input.msg.messageKind ?? input.msg.message_kind ?? '').trim()
     if (messageKind === 'narration_debug' || messageKind === 'system' || messageKind === 'caps_reply') return false
     if (normalizePromptHiddenValue(input.msg.autoWriteHidden ?? input.msg.auto_write_hidden) === true) return false
-    // 按配置态判定（不吃无模型兜底）：消息投影不依赖 ONNX 模型，配置了人格模型链路的角色
-    // 即使因无模型回退普通召回回复，重放后仍要重投影，投影链不因回退断档。
-    return resolveConfiguredReplyPipelineMode({
-      session: getCurrentSession() as Record<string, unknown> | null,
-      character: resolveCharacterByTargetId(input.speakerTarget)
-    }) === 'personality_model'
+    // 自动链路中，人格 profile 与普通召回都以消息投影为客观事实输入；
+    // 按原提示词改写后两者都必须重投影。只有 pure_prompt 明确跳过。
+    return shouldUseReplyWorkflowReply(input.speakerTarget)
   }
 
   async function runPromptReplayMessageProjection(input: {
@@ -467,7 +464,7 @@ export function useChatMessageOps({
   }) {
     if (!shouldRunPromptReplayMessageProjection(input)) return
     try {
-      const result = await runChatMessageProjectionBySessionId(input.sessionId, input.messageId)
+      const result = await runChatMessageProjectionBySessionId(input.sessionId, input.messageId, { promptLogMode: 'background' })
       const status = String((result as any)?.projection?.status ?? (result as any)?.data?.projection?.status ?? '').trim()
       if (status === 'failed') {
         toast('回复已保存，但消息投影失败', 'warning')
@@ -1121,7 +1118,7 @@ export function useChatMessageOps({
       const key = `${sessionId}:${messageId}`
       if (queuedProjectionFallbackJobs.has(key)) return
       queuedProjectionFallbackJobs.add(key)
-      runChatMessageProjectionBySessionId(sessionId, messageId)
+      runChatMessageProjectionBySessionId(sessionId, messageId, { promptLogMode: 'background' })
         .catch((error) => console.warn('投影优先兜底补投影失败:', error))
         .finally(() => queuedProjectionFallbackJobs.delete(key))
     })
@@ -2085,7 +2082,7 @@ export function useChatMessageOps({
       const messageId = Number(t?.messageId || 0)
       if (messageId <= 0) continue
       try {
-        await runChatMessageProjectionBySessionId(sessionId, messageId)
+        await runChatMessageProjectionBySessionId(sessionId, messageId, { promptLogMode: 'background' })
         reprojected += 1
       } catch (error) {
         console.error('提调重投影失败：', t?.ref, error)

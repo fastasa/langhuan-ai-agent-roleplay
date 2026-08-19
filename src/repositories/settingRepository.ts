@@ -11,7 +11,7 @@ import type {
 import { API } from '../config/api'
 import type { WorkspaceSettingsSnapshot } from '../types/workspace'
 import { buildWeatherDetailSummary } from '../utils/environmentFormat'
-import { cloneDefaultModelUsageConfigs, normalizeModelUsageConfigs } from '../utils/modelUsageConfig'
+import { cloneDefaultModelUsageConfigs, normalizeEmbeddingDimensions, normalizeModelUsageConfigs } from '../utils/modelUsageConfig'
 
 export interface SettingDraftState {
   apiPresetDraft: Record<string, unknown>
@@ -119,6 +119,8 @@ export const DEFAULT_BRAIN_AGENT_CONFIG: AgentModelConfig = {
   fallbackRecallModel: '',
   fallbackRecallMaxTokens: 512,
   embeddingPresetId: '',
+  embeddingModel: '',
+  embeddingDimensions: 512,
   narrationQuickJudgePresetName: '',
   narrationQuickJudgeModel: '',
   narrativeBeatPresetName: '',
@@ -224,6 +226,11 @@ export function normalizeAgentModelConfig(input: unknown, fallback: AgentModelCo
       fallback.fallbackRecallMaxTokens ?? DEFAULT_BRAIN_AGENT_CONFIG.fallbackRecallMaxTokens ?? 512
     ),
     embeddingPresetId: String(record.embeddingPresetId ?? record.embedding_preset_id ?? fallback.embeddingPresetId ?? '').trim(),
+    embeddingModel: String(record.embeddingModel ?? record.embedding_model ?? fallback.embeddingModel ?? '').trim(),
+    embeddingDimensions: normalizeEmbeddingDimensions(
+      record.embeddingDimensions ?? record.embedding_dimensions,
+      Number(fallback.embeddingDimensions || 512)
+    ),
     narrationQuickJudgePresetName: String(quickUsage?.presetName || record.narrationQuickJudgePresetName || record.narration_quick_judge_preset_name || fallback.narrationQuickJudgePresetName || '').trim(),
     narrationQuickJudgeModel: String(quickUsage?.model || record.narrationQuickJudgeModel || record.narration_quick_judge_model || fallback.narrationQuickJudgeModel || '').trim(),
     narrativeBeatPresetName: String(highVolumeUsage?.presetName || record.narrativeBeatPresetName || record.narrative_beat_preset_name || fallback.narrativeBeatPresetName || '').trim(),

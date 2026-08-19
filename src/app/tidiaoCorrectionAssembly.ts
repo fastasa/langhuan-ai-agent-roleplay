@@ -53,6 +53,7 @@ import { renderLastScenarioBlock, type LastScenario } from './orchestrationMater
 import {
   getHydratedLastScenario,
   getHydratedNarrativeOverrideText,
+  invalidateFormalSessionScenario,
   saveFormalSessionScenario
 } from './sessionOrchestrationMaterialsAdapter'
 import { runNarrativeScriptwriterAnalysis, type NarrativeScriptwriterDispatchInput, type RunNarrativeScriptwriterDeps } from './narrativeScriptwriterSubagent'
@@ -200,12 +201,51 @@ export function renderSessionLastScenarioBlock(sessionId: string): string {
   return renderLastScenarioBlock(getHydratedLastScenario(String(sessionId || '')))
 }
 
-/** 统筹收尾写回最近情境；正式行必须携带消息或 artifact 锚，不能再写无证据浏览器缓存。 */
-export function saveSessionLastScenario(sessionId: string, last: LastScenario | null, anchorMessageId = ''): void {
-  if (!last?.code) return
-  void saveFormalSessionScenario(String(sessionId || ''), { ...last, anchorMessageId }).catch((error) => {
-    console.warn('[orchestration-materials] 最近情境写入失败', error)
+/**
+ * 显式失效最近情境。失效本身也是带锚的正式持久化状态，刷新后不得复活旧 checkpoint。
+ */
+export async function invalidateSessionLastScenario(
+  sessionId: string,
+  anchorMessageId = '',
+  reason = '本轮检查点尚未完成，禁止复用',
+  force = false
+): Promise<void> {
+  await invalidateFormalSessionScenario(String(sessionId || ''), {
+    anchorMessageId,
+    reason,
+    force
   })
+}
+
+/** 统筹收尾写回最近情境；正式行必须携带消息或 artifact 锚，不能再写无证据浏览器缓存。 */
+export async function saveSessionLastScenario(
+  sessionId: string,
+  last: LastScenario | null,
+  anchorMessageId = '',
+  dependencySnapshot?: import('./replyOrchestrationRoute').ReplySituationDependencySnapshot
+): Promise<void> {
+  if (!last?.code) {
+    await invalidateSessionLastScenario(sessionId, anchorMessageId, '本轮没有合法 scenarioCode，旧检查点已失效')
+    return
+  }
+  try {
+    await saveFormalSessionScenario(String(sessionId || ''), {
+      ...last,
+      anchorMessageId,
+      ...(dependencySnapshot ? { dependencySnapshot } : {})
+    })
+  } catch (error) {
+    console.warn('[orchestration-materials] 最近情境写入失败，正在保持失效状态', error)
+    try {
+      await invalidateSessionLastScenario(sessionId, anchorMessageId, '新检查点保存失败，禁止继续复用旧检查点', true)
+    } catch (invalidateError) {
+      console.error('[orchestration-materials] 最近情境持久化失效也失败', invalidateError)
+      const saveMessage = error instanceof Error ? error.message : String(error || '未知错误')
+      const invalidateMessage = invalidateError instanceof Error ? invalidateError.message : String(invalidateError || '未知错误')
+      throw new Error(`最近情境保存失败，且持久化失效失败：${saveMessage}；${invalidateMessage}`)
+    }
+    throw error
+  }
 }
 
 // ── 编剧后台派遣（串行压缩批A·2026-07-13·全项目首个 fire-and-forget 子代理通道） ──

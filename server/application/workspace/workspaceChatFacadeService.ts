@@ -194,6 +194,7 @@ export function createWorkspaceChatFacadeService(
         lastSummaryTime: String(legacySession.last_summary_time || ''),
         loadedSummaryIds: String(legacySession.loaded_summary_ids || '[]'),
         contextSummary: String(legacySession.context_summary || ''),
+        contextSummaryMessageId: Number(legacySession.context_summary_message_id || 0),
         updatedAt: legacySession.updated_at || null,
         virtualSceneName: String(legacySession.virtual_scene_name || ''),
         virtualSceneDesc: String(legacySession.virtual_scene_desc || ''),

@@ -10,7 +10,7 @@ vi.mock('../../../src/repositories/chatRepository.ts', () => ({
   fetchChatPersonalityModelObservationsBySessionId: (...args) => fetchMock(...args)
 }))
 
-// mock 全局编排配置仓库：提示词树展示并可编辑这份全局配置
+// mock 本地编排配置仓库：审计页只读展示，编辑入口归文档库。
 const saveOrchestratorConfigMock = vi.fn(async (config) => config)
 vi.mock('../../../src/repositories/orchestratorConfigRepository.ts', () => ({
   fetchOrchestratorConfig: async () => ({
@@ -283,7 +283,7 @@ describe('PersonalityModelOrchestrationAuditPanel', () => {
     expect(html).toContain('张元英')
   })
 
-  it('展开提示词树展示本地可编辑配置并以圆点标注本轮已读', async () => {
+  it('展开提示词树只读展示本地配置并以圆点标注本轮已读', async () => {
     fetchMock.mockResolvedValue(buildPage())
     const wrapper = mount(PersonalityModelOrchestrationAuditPanel, {
       props: { sessionId: 'session_1', selectedMessageId: 33 }
@@ -305,9 +305,9 @@ describe('PersonalityModelOrchestrationAuditPanel', () => {
     expect(html).toContain('可调用工具')
     // 本轮命中情境（pressure）以 olive 圆点（.tn-read）标注
     expect(wrapper.find('.tn-read').exists()).toBe(true)
-    // 单机工作区直接开放编辑入口，不再依赖角色或后台。
-    expect(html).toContain('新建情境skill')
-    expect(wrapper.find('.tn-act').exists()).toBe(true)
+    // 正式编辑入口已迁入文档库，诊断页不得继续形成第二个写入口。
+    expect(html).not.toContain('新建情境skill')
+    expect(wrapper.find('.tn-act').exists()).toBe(false)
   })
 
   it('提示词树的小绿点能从 runtime 已读取情境解析，不依赖顶层 scenario 字段', async () => {
@@ -330,7 +330,7 @@ describe('PersonalityModelOrchestrationAuditPanel', () => {
     expect(scenarioNode.find('.tn-read').exists()).toBe(true)
   })
 
-  // 编辑能力由本地提示词树编辑器承载；审计侧栏只验证只读视图（见上一条）。
+  // 编辑能力由文档库“情境提示词”页承载；审计侧栏只验证只读视图（见上一条）。
 
   // 批次I·编排入口：runtimeOrchestration 入参 → 不依赖 messageId/持久化 trace 直接渲染（loop 期编排可见）。
   it('runtimeOrchestration 运行态入参：无持久化 trace 也按编排字段直接渲染', async () => {

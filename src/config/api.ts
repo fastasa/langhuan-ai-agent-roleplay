@@ -10,6 +10,8 @@ export const API = {
   // 数据接口
   AI_USAGE: `${API_BASE}/api/data/ai-usage`,
   aiUsageRound: (roundId: string) => `${API_BASE}/api/data/ai-usage/round?roundId=${encodeURIComponent(roundId)}`,
+  agentRuntimeJournalRuns: `${API_BASE}/api/data/agent-runtime-journal/runs`,
+  agentRuntimeJournalEvents: (runId: string) => `${API_BASE}/api/data/agent-runtime-journal/runs/${encodeURIComponent(runId)}/events`,
   // 星依聊天日记化归档（2026-07-16 批次3）：日记视角设置读写 + 立即生成今天日记
   XINGYI_DIARY_VIEWPOINT: `${API_BASE}/api/data/xingyi/diary/viewpoint`,
   XINGYI_DIARY_GENERATE_NOW: `${API_BASE}/api/data/xingyi/diary/generate-now`,

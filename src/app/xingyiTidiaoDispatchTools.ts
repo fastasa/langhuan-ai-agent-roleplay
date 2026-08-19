@@ -448,7 +448,7 @@ export function createDispatchTidiaoCorrectionTool(ctx: XingyiTidiaoDispatchCont
         const messageId = Number(target?.messageId || 0)
         if (messageId <= 0 || !writtenIds.has(messageId)) continue
         try {
-          await runChatMessageProjectionBySessionId(sessionId, messageId)
+          await runChatMessageProjectionBySessionId(sessionId, messageId, { promptLogMode: 'background' })
           reprojected += 1
         } catch (error) {
           console.error('星依 dispatch 重投影失败：', target?.ref, error)

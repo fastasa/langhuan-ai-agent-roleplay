@@ -26,6 +26,7 @@ import {
 } from './agentProtocols'
 // P2 批 E2（2026-07-12 架构审查·规则常量单真值化）：「必须真发起原生函数调用才生效」核心句单点收编，见该文件注释。
 import { TOOL_CALL_REALITY_RULE } from './agentProtocols/sharedRules'
+import { DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL } from './directorDirective'
 
 // 提调上下文 0-6 分层骨架（2026-07-02·用户重定义·取代旧 1-7 编号）：真实 prompt 按固定命名层装配，让模型「分清层级」。
 // 编号＝层语义身份；物理顺序按缓存铁律「越稳定越靠前、越高频变动越靠后」（KV 缓存按前缀命中）——
@@ -480,7 +481,8 @@ export function buildGroupDirectorPromptParts(
     ? [
       '【用户私密指令·必须遵守·禁止泄露】下面是用户本轮只对你（提调）下达的私密指令，用双层方括号【【…】】包裹发出，只有你能看到：',
       directives.map((item, index) => `${index + 1}. ${item}`).join('\n'),
-      '硬性要求：① 必须在本轮 situation/narration/cast 的方向里遵守这些指令，优先级高于常规剧情判断；',
+      DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL,
+      '① 必须在本轮 situation/narration/cast 的方向与实际后续生成里落实这些指令，不能只在 thought 里口头确认；',
       '② 绝对禁止把指令文字、含义或「用户下过私密指令」这件事泄露到旁白正文、角色台词等任何剧情可见产出；角色并不知情，不要让角色像听到了指令一样反应；',
       '③ 允许在 thoughts 决策流里简短反映「已收到用户私密安排并据此调度」（thoughts 是给用户看的导演旁述、不是剧情产出），但不要复述指令原文。',
     ].join('\n')

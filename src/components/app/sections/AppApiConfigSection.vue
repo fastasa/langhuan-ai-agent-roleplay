@@ -238,13 +238,56 @@
                   参数
                 </button>
               </div>
-              <!-- 批次3·第四槽「编目」＝嵌入向量：走服务端管理嵌入预设（capability=embedding·与文本槽不同源），
-                   现役恒用琅嬛默认，暂不开放自选（开放与否待用户真机后拍板），此处只展示走向。 -->
-              <div class="agent-usage-row agent-usage-row--readonly">
+              <div class="agent-usage-row agent-usage-row--embedding">
                 <div class="agent-usage-row__label">
                   <strong>编目（嵌入）</strong>
-                  <small>向量召回/取料嵌入使用：琅嬛默认嵌入预设（服务端统一管理）</small>
+                  <small>向量召回/取料使用；请选择支持 embeddings 的本地 API 预设</small>
                 </div>
+                <label class="api-field api-field--select">
+                  <span>预设</span>
+                  <select
+                    :value="draftAgentConfig.embeddingPresetId || ''"
+                    @change="selectEmbeddingPreset(($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">请选择嵌入预设</option>
+                    <option v-for="preset in embeddingPresetOptions" :key="`embedding-${String(preset.name)}`" :value="preset.name">{{ preset.name }}</option>
+                  </select>
+                </label>
+                <label class="api-field agent-model-field">
+                  <span>模型</span>
+                  <span class="agent-model-input-shell">
+                    <input
+                      :value="draftAgentConfig.embeddingModel || ''"
+                      :disabled="embeddingModelLoading"
+                      placeholder="填写嵌入模型名"
+                      @focus="openEmbeddingModelMenu"
+                      @keydown.escape="closeEmbeddingModelMenu"
+                      @input="updateEmbeddingModel(($event.target as HTMLInputElement).value)"
+                    >
+                    <button
+                      type="button"
+                      class="agent-model-arrow"
+                      :disabled="!embeddingModelOptions.length"
+                      @click="toggleEmbeddingModelMenu"
+                    >⌄</button>
+                    <div v-if="embeddingModelMenuOpen && embeddingModelOptions.length" class="agent-narration-model-menu">
+                      <button
+                        v-for="model in embeddingModelOptions"
+                        :key="`embedding-model-${model}`"
+                        type="button"
+                        class="agent-narration-model-option"
+                        @mousedown.prevent="selectEmbeddingModel(model)"
+                      >{{ model }}</button>
+                    </div>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  class="api-config-secondary-button agent-model-load-button"
+                  :disabled="embeddingModelLoading || !selectedEmbeddingPreset"
+                  @click="loadEmbeddingPresetModels"
+                >{{ embeddingModelLoading ? '加载中...' : '加载模型' }}</button>
+                <button type="button" class="api-config-secondary-button" @click="openEmbeddingSettings">参数</button>
               </div>
             </div>
           </section>
@@ -405,6 +448,20 @@
             <option value="enabled">{{ isEditingSubscriptionBridge ? '返回摘要' : '传回' }}</option>
           </select>
         </label>
+        <label v-if="editingModelUsageShowsEffort" class="api-field api-field--select">
+          <span>努力程度</span>
+          <select
+            :value="editingModelUsageConfig.effort"
+            @change="updateModelUsageDraft(editingModelUsageSlot, { effort: ($event.target as HTMLSelectElement).value })"
+          >
+            <option value="">{{ editingModelUsageDefaultEffortLabel }}</option>
+            <option
+              v-for="option in editingModelUsageEffortOptions"
+              :key="option.reasoningEffort"
+              :value="option.reasoningEffort"
+            >{{ option.description ? `${option.reasoningEffort}｜${option.description}` : option.reasoningEffort }}</option>
+          </select>
+        </label>
         <div v-if="editingFastServiceTierAvailable" class="api-option-row api-option-row--compact">
           <span class="api-option-row__copy">
             <strong>快速服务</strong>
@@ -421,6 +478,29 @@
       </div>
       <template #actions>
         <button type="button" class="api-footer-button api-footer-button--primary" @click="closeModelUsageSettings">完成</button>
+      </template>
+    </AppModalShell>
+    <AppModalShell
+      v-if="editingEmbeddingSettings"
+      :open="editingEmbeddingSettings"
+      title="嵌入参数"
+      size="sm"
+      @close="closeEmbeddingSettings"
+    >
+      <div class="agent-params-dialog">
+        <label class="api-field api-field--select">
+          <span>向量维度</span>
+          <select
+            :value="draftAgentConfig.embeddingDimensions || 512"
+            @change="updateEmbeddingDimensions(Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option v-for="dimension in AI_EMBEDDING_DIMENSIONS" :key="dimension" :value="dimension">{{ dimension }}</option>
+          </select>
+          <small class="api-field-hint">必须与所选嵌入模型实际返回的向量维度一致</small>
+        </label>
+      </div>
+      <template #actions>
+        <button type="button" class="api-footer-button api-footer-button--primary" @click="closeEmbeddingSettings">完成</button>
       </template>
     </AppModalShell>
   </section>
@@ -444,14 +524,16 @@ import type {
   NamedEntity
 } from '../../../types/panelContracts'
 import { API } from '../../../config/api'
-import { cloneDefaultModelUsageConfigs, normalizeModelUsageConfigs } from '../../../utils/modelUsageConfig'
+import { cloneDefaultModelUsageConfigs, normalizeModelReasoningEffort, normalizeModelUsageConfigs } from '../../../utils/modelUsageConfig'
 import {
+  getModelDefaultReasoningEffort,
+  getModelReasoningEffortOptions,
   isSubscriptionBridgeProvider,
   modelSupportsServiceTier,
   subscriptionBridgeReturnsThinkingSummary,
   type AiModelCatalogItem
 } from '../../../utils/subscriptionBridgeParameters'
-import { getAiProviderTemplate, getKeylessAiProviderHint, isKeylessAiProvider, normalizeAiProviderType } from '../../../../shared/aiProviders'
+import { AI_EMBEDDING_DIMENSIONS, getAiProviderTemplate, getKeylessAiProviderHint, isKeylessAiProvider, normalizeAiProviderType } from '../../../../shared/aiProviders'
 import AppModalShell from '../../common/AppModalShell.vue'
 
 const props = defineProps<{
@@ -492,6 +574,8 @@ const defaultBrainAgentConfig: AgentModelConfig = {
   fallbackRecallModel: '',
   fallbackRecallMaxTokens: 512,
   embeddingPresetId: '',
+  embeddingModel: '',
+  embeddingDimensions: 512,
   narrationQuickJudgePresetName: '',
   narrationQuickJudgeModel: '',
   narrativeBeatPresetName: '',
@@ -511,7 +595,7 @@ const defaultBrainAgentConfig: AgentModelConfig = {
   capabilities: ['recall_judgment', 'writeback_review', 'narration_quick_judge', 'narrative_beat', 'narration_generation', 'virtual_scene_location_scan']
 }
 
-// 文本槽四档+编目（嵌入·服务端管理默认，UI 单独展示行）。
+// 文本槽四档+编目（嵌入·本地预设/模型/维度独立配置，UI 单独展示行）。
 // 调用场景→档位由代码内任务分级表决定（src/utils/modelTaskTiers.ts），槽位只管「这一档用哪个预设/模型」。
 // ⚠️ 联动：MobileApiConfigWorkspace.vue 的 modelUsageSlots 是同一份口径的移动端复制，改这里要同步改那边。
 const modelUsageSlots: Array<{ id: ModelUsageSlotId; label: string; hint: string }> = [
@@ -569,6 +653,10 @@ const modelUsageLoading = ref<Record<ModelUsageSlotId, boolean>>({
 })
 const activeModelUsageMenu = ref<ModelUsageSlotId | ''>('')
 const editingModelUsageSlot = ref<ModelUsageSlotId | ''>('')
+const embeddingModelOptions = ref<string[]>([])
+const embeddingModelLoading = ref(false)
+const embeddingModelMenuOpen = ref(false)
+const editingEmbeddingSettings = ref(false)
 
 const providerLabel = computed(() => {
   const current = props.viewModel.apiProviderTemplates.find((item) => String(item.id || item.name) === draftApiPresetForm.value.providerType)
@@ -645,6 +733,11 @@ function normalizeUsageMaxTokens(value: unknown, fallback: number): number {
   return Math.max(1, Math.min(32768, Math.trunc(next)))
 }
 
+function normalizeEmbeddingDimensions(value: unknown): number {
+  const numeric = Number(value)
+  return AI_EMBEDDING_DIMENSIONS.includes(numeric as typeof AI_EMBEDDING_DIMENSIONS[number]) ? numeric : 512
+}
+
 function cloneModelUsageConfigs(source: Partial<AgentModelConfig> = {}): ModelUsageConfig[] {
   return normalizeModelUsageConfigs(source, defaultModelUsageConfigs)
 }
@@ -672,7 +765,9 @@ function cloneAgentConfig(source: Partial<AgentModelConfig> = {}): AgentModelCon
     fallbackPresetName: String(source.fallbackPresetName || ''),
     fallbackRecallModel: String(source.fallbackRecallModel || ''),
     fallbackRecallMaxTokens: toNumber(source.fallbackRecallMaxTokens, defaultBrainAgentConfig.fallbackRecallMaxTokens || 512),
-    embeddingPresetId: '',
+    embeddingPresetId: String(source.embeddingPresetId || ''),
+    embeddingModel: String(source.embeddingModel || ''),
+    embeddingDimensions: normalizeEmbeddingDimensions(source.embeddingDimensions),
     narrationQuickJudgePresetName: String(quickUsage?.presetName || source.narrationQuickJudgePresetName || ''),
     narrationQuickJudgeModel: String(quickUsage?.model || source.narrationQuickJudgeModel || ''),
     narrativeBeatPresetName: String(highVolumeUsage?.presetName || source.narrativeBeatPresetName || ''),
@@ -906,6 +1001,31 @@ const editingModelUsageProviderType = computed(() => {
 const isEditingSubscriptionBridge = computed(() => isSubscriptionBridgeProvider(editingModelUsageProviderType.value))
 const isEditingAgySubscriptionBridge = computed(() => isEditingSubscriptionBridge.value
   && !subscriptionBridgeReturnsThinkingSummary(editingModelUsageProviderType.value))
+const editingModelUsageShowsEffort = computed(() => (
+  editingModelUsageProviderType.value === 'codex-subscription'
+  || editingModelUsageProviderType.value === 'claude-code'
+))
+const editingModelUsageEffortOptions = computed(() => {
+  if (!editingModelUsageSlot.value || !editingModelUsageShowsEffort.value) return []
+  const options = getModelReasoningEffortOptions(
+    editingModelUsageProviderType.value,
+    getEffectiveModelUsageModel(editingModelUsageSlot.value),
+    modelUsageCatalogs.value[editingModelUsageSlot.value] || []
+  )
+  const savedEffort = normalizeModelReasoningEffort(editingModelUsageConfig.value.effort)
+  if (savedEffort && !options.some((option) => option.reasoningEffort === savedEffort)) {
+    return [...options, { reasoningEffort: savedEffort, description: '已保存档位' }]
+  }
+  return options
+})
+const editingModelUsageDefaultEffortLabel = computed(() => {
+  if (!editingModelUsageSlot.value) return '跟随模型默认'
+  const effort = getModelDefaultReasoningEffort(
+    getEffectiveModelUsageModel(editingModelUsageSlot.value),
+    modelUsageCatalogs.value[editingModelUsageSlot.value] || []
+  )
+  return effort ? `跟随模型默认（${effort}）` : '跟随模型默认'
+})
 
 const editingFastServiceTierAvailable = computed(() => {
   if (!editingModelUsageSlot.value || editingModelUsageProviderType.value !== 'codex-subscription') return false
@@ -983,18 +1103,24 @@ function selectModelUsagePreset(slotId: ModelUsageSlotId, presetName: string) {
   const nextCatalogs = { ...modelUsageCatalogs.value }
   delete nextCatalogs[slotId]
   modelUsageCatalogs.value = nextCatalogs
-  updateModelUsageDraft(slotId, { presetName, model: '', serviceTier: '' })
+  updateModelUsageDraft(slotId, { presetName, model: '', effort: '', serviceTier: '' })
 }
 
 function updateModelUsageModelDraft(slotId: ModelUsageSlotId, model: string) {
   const current = getModelUsageConfig(slotId)
+  const effortOptions = getModelReasoningEffortOptions(
+    getUsageProviderTypeForModel(slotId),
+    model || 'default',
+    modelUsageCatalogs.value[slotId] || []
+  )
+  const keepEffort = !current.effort || effortOptions.some((option) => option.reasoningEffort === current.effort)
   const keepFast = current.serviceTier === 'fast' && modelSupportsServiceTier(
     getUsageProviderTypeForModel(slotId),
     model || 'default',
     modelUsageCatalogs.value[slotId] || [],
     'fast'
   )
-  updateModelUsageDraft(slotId, { model, serviceTier: keepFast ? 'fast' : '' })
+  updateModelUsageDraft(slotId, { model, effort: keepEffort ? current.effort : '', serviceTier: keepFast ? 'fast' : '' })
 }
 
 function getUsageProviderTypeForModel(slotId: ModelUsageSlotId): string {
@@ -1016,6 +1142,7 @@ function updateModelUsageDraft(slotId: ModelUsageSlotId, changes: Partial<ModelU
       temperature: normalizeTemperature(changes.temperature, item.temperature),
       maxTokens: normalizeUsageMaxTokens(changes.maxTokens, item.maxTokens),
       thinking: changes.thinking === 'enabled' || changes.thinking === 'disabled' ? changes.thinking : item.thinking,
+      effort: changes.effort === undefined ? item.effort : normalizeModelReasoningEffort(changes.effort),
       serviceTier: changes.serviceTier === undefined ? item.serviceTier : (changes.serviceTier === 'fast' ? 'fast' : '')
     }
   })
@@ -1092,6 +1219,94 @@ async function openModelUsageSettings(slotId: ModelUsageSlotId) {
   if (getUsageProviderTypeForModel(slotId) === 'codex-subscription' && !modelUsageCatalogs.value[slotId]) {
     await loadModelUsagePresetModels(slotId, false)
   }
+}
+
+const embeddingPresetOptions = computed(() => props.viewModel.apiPresets.filter((preset) => {
+  const provider = normalizeAiProviderType((preset as Record<string, unknown>).providerType
+    ?? (preset as Record<string, unknown>).provider_type)
+  return !isKeylessAiProvider(provider)
+}))
+
+const selectedEmbeddingPreset = computed(() => {
+  const name = String(draftAgentConfig.value.embeddingPresetId || '').trim()
+  return embeddingPresetOptions.value.find((preset) => String(preset.name || '').trim() === name) || null
+})
+
+function selectEmbeddingPreset(presetName: string) {
+  draftAgentConfig.value = cloneAgentConfig({
+    ...draftAgentConfig.value,
+    embeddingPresetId: String(presetName || '').trim(),
+    embeddingModel: ''
+  })
+  embeddingModelOptions.value = []
+  embeddingModelMenuOpen.value = false
+}
+
+function updateEmbeddingModel(model: string) {
+  draftAgentConfig.value = cloneAgentConfig({
+    ...draftAgentConfig.value,
+    embeddingModel: String(model || '').trim()
+  })
+}
+
+function selectEmbeddingModel(model: string) {
+  updateEmbeddingModel(model)
+  closeEmbeddingModelMenu()
+}
+
+function openEmbeddingModelMenu() {
+  if (embeddingModelOptions.value.length) embeddingModelMenuOpen.value = true
+}
+
+function closeEmbeddingModelMenu() {
+  embeddingModelMenuOpen.value = false
+}
+
+function toggleEmbeddingModelMenu() {
+  if (embeddingModelMenuOpen.value) closeEmbeddingModelMenu()
+  else openEmbeddingModelMenu()
+}
+
+async function loadEmbeddingPresetModels() {
+  const preset = selectedEmbeddingPreset.value
+  if (!preset) return
+  embeddingModelLoading.value = true
+  try {
+    const response = await fetch(API.AI_MODELS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ presetName: preset.name })
+    })
+    const data = await response.json() as { data?: AiModelCatalogItem[]; error?: string }
+    if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`)
+    embeddingModelOptions.value = Array.isArray(data.data)
+      ? data.data.map((item) => String(item?.id || '').trim()).filter(Boolean)
+      : []
+    openEmbeddingModelMenu()
+  } catch (error) {
+    console.error('加载嵌入模型列表失败:', error)
+    embeddingModelOptions.value = []
+    closeEmbeddingModelMenu()
+  } finally {
+    embeddingModelLoading.value = false
+  }
+}
+
+function updateEmbeddingDimensions(value: number) {
+  draftAgentConfig.value = cloneAgentConfig({
+    ...draftAgentConfig.value,
+    embeddingDimensions: normalizeEmbeddingDimensions(value)
+  })
+}
+
+function openEmbeddingSettings() {
+  editingEmbeddingSettings.value = true
+}
+
+async function closeEmbeddingSettings() {
+  const wasOpen = editingEmbeddingSettings.value
+  editingEmbeddingSettings.value = false
+  if (wasOpen) await saveDraftAgentSettings()
 }
 
 function toggleEditingFastServiceTier() {
@@ -1325,7 +1540,7 @@ async function saveDraftWeatherSettings() {
 async function saveDraftAgentSettings() {
   props.actions.updateAgentModelConfig({
     id: draftAgentConfig.value.id,
-    changes: { ...draftAgentConfig.value, embeddingPresetId: '', enabled: true }
+    changes: { ...draftAgentConfig.value, enabled: true }
   })
   await Promise.resolve(props.actions.saveAgentModelConfig())
 }

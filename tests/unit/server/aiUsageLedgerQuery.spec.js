@@ -347,6 +347,57 @@ describe('ai usage ledger query', () => {
     }))
   })
 
+  it('persists request-envelope diagnostic identity and hashes without treating them as cache-hit evidence', async () => {
+    const { db } = await createSqlJsWrapper()
+    createUsageTables(db)
+    const repository = createAiRepository(db)
+
+    repository.insertUsageLedger({
+      id: 'usage_envelope_diagnostics',
+      userId: 'user_a',
+      presetId: 'preset_1',
+      presetName: '琅嬛预设',
+      feature: 'agent',
+      sessionId: 'session_a',
+      profileId: 'tidiao.director-round',
+      harnessRunId: 'director_run_1',
+      modelTurnIndex: 2,
+      toolEpoch: 1,
+      toolEpochTurnIndex: 0,
+      promptRebuild: true,
+      activeToolNamesHash: 'fnv1a32:11111111',
+      toolSchemaHash: 'fnv1a32:22222222',
+      systemHash: 'fnv1a32:33333333',
+      messagePrefixHash: 'fnv1a32:44444444',
+      requestEnvelopeHash: 'fnv1a32:55555555',
+      firstDiffSource: 'tools',
+      model: 'gpt-test',
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      estimatedCostCents: 0,
+      status: 'success'
+    })
+
+    const result = repository.queryUsageLedger({ range: 'today', now: new Date() })
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      id: 'usage_envelope_diagnostics',
+      profile_id: 'tidiao.director-round',
+      harness_run_id: 'director_run_1',
+      model_turn_index: 2,
+      tool_epoch: 1,
+      tool_epoch_turn_index: 0,
+      prompt_rebuild: 1,
+      active_tool_names_hash: 'fnv1a32:11111111',
+      tool_schema_hash: 'fnv1a32:22222222',
+      system_hash: 'fnv1a32:33333333',
+      message_prefix_hash: 'fnv1a32:44444444',
+      request_envelope_hash: 'fnv1a32:55555555',
+      first_diff_source: 'tools',
+      cache_read_tokens: 0
+    }))
+  })
+
   // 缓存可见性（2026-07-07）：Claude Code 订阅桥会带 cache_read/cache_creation 拆分，
   // 别的 provider 没有就落 0；插入/查询都要原样透传，不能被 input_tokens 覆盖或吞掉。
   it('persists cache_read_tokens/cache_creation_tokens through insertUsageLedger and returns them in queries', async () => {

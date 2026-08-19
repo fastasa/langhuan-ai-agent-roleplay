@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  PromptPresetOrderingValidationError,
   assignPromptPresetAssemblyOrder,
   normalizePromptPresetAssemblyOrder,
   sortPromptPresetsForAssembly
@@ -38,5 +39,49 @@ describe('promptPresetOrdering', () => {
       { id: 'later', orderIndex: 0 },
       { id: 'first', orderIndex: 1 }
     ])
+  })
+
+  it('strict 拒绝非法顺序值，并返回稳定 code 和 fragmentId', () => {
+    expect(() => sortPromptPresetsForAssembly([
+      { id: 'bad', orderIndex: '1' }
+    ], { strict: true })).toThrowError(expect.objectContaining({
+      name: 'PromptPresetOrderingValidationError',
+      code: 'prompt_preset_invalid_order',
+      fragmentId: 'bad'
+    }))
+  })
+
+  it('strict 拒绝同一 preset 的顺序别名冲突', () => {
+    try {
+      sortPromptPresetsForAssembly([
+        { id: 'ambiguous', orderIndex: 1, order_index: 2 }
+      ], { strict: true })
+      throw new Error('预期 strict 校验失败')
+    } catch (error) {
+      expect(error).toBeInstanceOf(PromptPresetOrderingValidationError)
+      expect(error).toMatchObject({
+        code: 'prompt_preset_order_alias_conflict',
+        fragmentId: 'ambiguous'
+      })
+    }
+  })
+
+  it('strict 拒绝两个 preset 的显式顺序冲突', () => {
+    expect(() => normalizePromptPresetAssemblyOrder([
+      { id: 'first', orderIndex: 3 },
+      { id: 'second', position: 3 }
+    ], { strict: true })).toThrowError(expect.objectContaining({
+      code: 'prompt_preset_order_conflict',
+      fragmentId: 'second'
+    }))
+  })
+
+  it('strict 允许缺省顺序并继续使用稳定输入顺序', () => {
+    const result = sortPromptPresetsForAssembly([
+      { id: 'first' },
+      { id: 'second' }
+    ], { strict: true })
+
+    expect(result.map((item) => item.id)).toEqual(['first', 'second'])
   })
 })

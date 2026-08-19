@@ -74,6 +74,7 @@ import { getCurrentAiUsageContext } from '../app/aiUsageContext'
 import { SCENARIO_MOUNTED_PROMPTS_PLACEHOLDER } from '../app/scenarioMountedPromptPlaceholder'
 import type { AiUsageFeature } from '../../shared/aiUsageFeatures'
 import { contentToText, upgradeCurrentUserMessageWithAttachments, type AIContentPart, type ChatImageAttachment } from '../utils/chatAttachments'
+import { buildEmbeddingCacheScope, resolveEmbeddingModelConfig } from '../utils/modelUsageConfig'
 export type { AIContentPart } from '../utils/chatAttachments'
 
 // 类型定义
@@ -702,7 +703,19 @@ export function useAI(dependencies: UseAIOptions = {}) {
           sessionId: usageMeta.sessionId,
           sessionLabel: usageMeta.sessionLabel,
           roundId: usageMeta.roundId,
-          unitKind: usageMeta.unitKind
+          unitKind: usageMeta.unitKind,
+          profileId: options.profileId,
+          harnessRunId: options.harnessRunId,
+          modelTurnIndex: options.modelTurnIndex,
+          toolEpoch: options.toolEpoch,
+          toolEpochTurnIndex: options.toolEpochTurnIndex,
+          promptRebuild: options.promptRebuild,
+          activeToolNamesHash: options.activeToolNamesHash,
+          toolSchemaHash: options.toolSchemaHash,
+          systemHash: options.systemHash,
+          messagePrefixHash: options.messagePrefixHash,
+          requestEnvelopeHash: options.requestEnvelopeHash,
+          firstDiffSource: options.firstDiffSource
         }
       }, {
         signal: controller.signal
@@ -1633,6 +1646,7 @@ export function useAI(dependencies: UseAIOptions = {}) {
       recallEmbeddingVectorCache: _recallEmbeddingVectorCache,
       callAI,
       callEmbeddings: async (input, embeddingOptions) => {
+        const embeddingConfig = resolveEmbeddingModelConfig(brainAgentConfig)
         const usageMeta = resolveCurrentSessionUsageMeta({
           feature: 'embedding',
           usageLabel: '召回嵌入',
@@ -1640,7 +1654,9 @@ export function useAI(dependencies: UseAIOptions = {}) {
         })
         const response = await requestAiEmbeddings({
           input,
-          presetId: brainAgentConfig?.embeddingPresetId || undefined,
+          presetId: embeddingConfig.presetId || undefined,
+          model: embeddingConfig.model || undefined,
+          dimensions: embeddingConfig.dimensions,
           meta: {
             usageLabel: usageMeta.usageLabel,
             placeLabel: usageMeta.placeLabel,
@@ -1709,6 +1725,7 @@ export function useAI(dependencies: UseAIOptions = {}) {
   /** 提调取料嵌入调用：与召回链路同一 embedding 实现 + presetId，placeLabel 标明取料场景（角色名 / 文档库）。 */
   function makeTidiaoRetrievalEmbedTexts(placeLabel: string) {
     const brainAgentConfig = _settingStore?.getBrainAgentConfig?.()
+    const embeddingConfig = resolveEmbeddingModelConfig(brainAgentConfig)
     return async (input: string[]) => {
       const usageMeta = resolveCurrentSessionUsageMeta({
         feature: 'embedding',
@@ -1717,7 +1734,9 @@ export function useAI(dependencies: UseAIOptions = {}) {
       })
       const response = await requestAiEmbeddings({
         input,
-        presetId: brainAgentConfig?.embeddingPresetId || undefined,
+        presetId: embeddingConfig.presetId || undefined,
+        model: embeddingConfig.model || undefined,
+        dimensions: embeddingConfig.dimensions,
         meta: {
           usageLabel: usageMeta.usageLabel,
           placeLabel: usageMeta.placeLabel,
@@ -1756,7 +1775,7 @@ export function useAI(dependencies: UseAIOptions = {}) {
   ): TidiaoRetrievalContext | null {
     initStores()
     const brainAgentConfig = _settingStore?.getBrainAgentConfig?.()
-    const cacheScope = brainAgentConfig?.embeddingPresetId || 'default'
+    const cacheScope = buildEmbeddingCacheScope(brainAgentConfig)
     // 世界文档范围：两种取料接缝的文档来源都按会话所挂世界裁（未挂世界→零文档库；
     // per-speaker 分支角色大脑卡不受影响，仅其中的文档库单元受限）。
     // allDocuments（星依总 agent 全局语境专用）：不挂在聊天会话上，取全量文档库，绕过世界范围。
@@ -1796,7 +1815,7 @@ export function useAI(dependencies: UseAIOptions = {}) {
   ): Promise<{ characterPools: Record<string, RecallPoolCard[]>; worldPool: RecallPoolCard[] }> {
     initStores()
     const brainAgentConfig = _settingStore?.getBrainAgentConfig?.()
-    const cacheScope = brainAgentConfig?.embeddingPresetId || 'default'
+    const cacheScope = buildEmbeddingCacheScope(brainAgentConfig)
     // 世界文档范围：世界池填池只读会话所挂世界的文档（角色池不碰 documents、不受影响）。
     const documents = resolveDocLibraryDocumentsForSession(options.sessionId)
     const userProfile = (_charStore?.userProfile || {}) as Record<string, unknown>

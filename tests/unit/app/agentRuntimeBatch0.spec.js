@@ -24,6 +24,7 @@ describe('agent runtime 批次 0 协议 fixture', () => {
     expect(AGENT_RUNTIME_ERROR_TYPES).toEqual([
       'INVALID_ARGUMENT',
       'TOOL_NOT_FOUND',
+      'TOOL_TIMEOUT',
       'TOOL_RUNTIME_ERROR',
       'EXPECTATION_MISMATCH',
       'BUDGET_EXCEEDED',

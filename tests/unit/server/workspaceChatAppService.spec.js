@@ -74,6 +74,47 @@ function createChatService(overrides = {}) {
 }
 
 describe('workspaceChatAppService', () => {
+  it('提示词日志序号按现存角色消息计算，不按数据库 id 或日志行数计算', () => {
+    const rows = [
+      { id: 'reply_15', assistantMessageId: 15, logKind: 'final_reply', messageKind: 'chat', finalPrompt: '第四次角色输出提示词' },
+      { id: 'reply_9', assistantMessageId: 9, logKind: 'final_reply', messageKind: 'chat', finalPrompt: '第三次角色输出提示词' },
+      { id: 'reply_6', assistantMessageId: 6, logKind: 'final_reply', messageKind: 'chat', finalPrompt: '第二次角色输出提示词' },
+      { id: 'reply_2', assistantMessageId: 2, logKind: 'final_reply', messageKind: 'chat', finalPrompt: '第一次角色输出提示词' }
+    ]
+    const service = createChatService({
+      chatRepository: {
+        getSessionById: vi.fn(() => ({ id: 'session_1' })),
+        countVisiblePromptLogMessagesBySessionId: vi.fn(() => 4),
+        listPromptLogsBySessionId: vi.fn(() => rows),
+        listPromptLogIndexRowsBySessionId: vi.fn(() => [
+          { id: 'reply_2', assistantMessageId: 2, logKind: 'final_reply', messageKind: 'chat' },
+          { id: 'internal_6', assistantMessageId: 6, logKind: 'internal_agent', messageKind: 'chat' },
+          { id: 'reply_6', assistantMessageId: 6, logKind: 'final_reply', messageKind: 'chat' },
+          { id: 'reply_9', assistantMessageId: 9, logKind: 'final_reply', messageKind: 'chat' },
+          { id: 'reply_15', assistantMessageId: 15, logKind: 'final_reply', messageKind: 'chat' }
+        ])
+      }
+    })
+
+    const result = service.getChatPromptLogsBySessionId('session_1', 1, 30)
+
+    expect(result.ok).toBe(true)
+    expect(result.data.total).toBe(4)
+    expect(result.data.entries[0]).toEqual(expect.objectContaining({
+      assistantMessageId: 15,
+      totalIndex: 4,
+      totalCount: 4,
+      kindIndex: 4,
+      kindTotal: 4
+    }))
+    expect(result.data.entries.find((entry) => entry.id === 'reply_6')).toEqual(expect.objectContaining({
+      totalIndex: 2,
+      totalCount: 4,
+      kindIndex: 2,
+      kindTotal: 4
+    }))
+  })
+
   it('统一 Agent 上下文入口按注册配方返回带版本与来源的投影包', async () => {
     const service = createChatService({
       orchestrationPresenceService: { list: vi.fn(() => ({ ok: true, data: { items: [] } })) },
@@ -525,6 +566,62 @@ describe('workspaceChatAppService', () => {
     expect(result.data.traces[0].payload.candidatePlans[0]).toEqual(expect.objectContaining({ id: 'plan_1', score: 99 }))
   })
 
+  it('人格模型观察保留稳定续话的 direct ReRanker 成功与降级审计', () => {
+    const service = createChatService({
+      chatRepository: {
+        getSessionById: vi.fn(() => ({ id: 'session_1' })),
+        listGenerationAttemptsBySessionId: vi.fn(() => []),
+        listGenerationAttemptArtifactsBySessionId: vi.fn(() => [
+          {
+            id: 'artifact_direct_success',
+            attempt_id: 'attempt_direct_success',
+            session_id: 'session_1',
+            artifact_kind: 'personality_model_trace',
+            payload_json: JSON.stringify({
+              rerankerDiagnostics: {
+                executionPolicy: 'reuse_direct_personality_rerank',
+                selectedPlanId: 'reuse_direct_persona'
+              },
+              candidatePlans: [
+                { id: 'reuse_direct_balanced', score: 0.1 },
+                { id: 'reuse_direct_persona', score: 0.9 },
+                { id: 'reuse_direct_reactive', score: 0.2 }
+              ],
+              topPlans: [{ id: 'reuse_direct_persona', score: 0.9 }]
+            })
+          },
+          {
+            id: 'artifact_direct_degraded',
+            attempt_id: 'attempt_direct_degraded',
+            session_id: 'session_1',
+            artifact_kind: 'personality_model_trace',
+            payload_json: JSON.stringify({
+              rerankerDiagnostics: {
+                executionPolicy: 'reuse_direct_personality_rerank',
+                selectedPlanId: 'reuse_direct_balanced',
+                degraded: true,
+                reason: '本地人格模型暂不可用'
+              },
+              candidatePlans: [
+                { id: 'reuse_direct_balanced' },
+                { id: 'reuse_direct_persona' },
+                { id: 'reuse_direct_reactive' }
+              ],
+              topPlans: [{ id: 'reuse_direct_balanced' }]
+            })
+          }
+        ])
+      }
+    })
+
+    const result = service.getChatPersonalityModelObservationsBySessionId('session_1')
+    expect(result.ok).toBe(true)
+    expect(result.data.traces.map((trace) => trace.id)).toEqual([
+      'artifact_direct_success',
+      'artifact_direct_degraded'
+    ])
+  })
+
   it('本地工作区可读取人格模型观察的 orchestration 工程细节', () => {
     const buildRepo = () => ({
       getSessionById: vi.fn(() => ({ id: 'session_1' })),
@@ -848,6 +945,7 @@ describe('workspaceChatAppService', () => {
       expect.objectContaining({
         assistantMessageId: 9,
         speakerName: '消息投影 Agent',
+        logKind: 'manual_projection',
         finalPrompt: expect.stringContaining('#6 [五条悟] 五条悟最新投影事实')
       })
     )
@@ -864,6 +962,15 @@ describe('workspaceChatAppService', () => {
     expect(insertPromptLog.mock.calls[0][1].finalPrompt).toContain('事实：')
     expect(insertPromptLog.mock.calls[0][1].finalPrompt).not.toContain('sourceProjectionIds')
     expect(insertPromptLog.mock.calls[0][1].finalPrompt).not.toContain('projection_1')
+
+    insertPromptLog.mockClear()
+    await service.runChatMessageProjectionBySessionId(
+      'session_1',
+      9,
+      { userId: 'local' },
+      { promptLogMode: 'background' }
+    )
+    expect(insertPromptLog).not.toHaveBeenCalled()
   })
 
   it('纯私密指令用户消息：不调投影模型，直接落空事实 complete 投影并写可见性', async () => {
@@ -1046,14 +1153,8 @@ describe('workspaceChatAppService', () => {
       'session_1',
       expect.objectContaining({ characterId: 'char_xingyi', visibility: 'visible' })
     )
-    expect(insertPromptLog).toHaveBeenCalledWith(
-      'session_1',
-      expect.objectContaining({
-        assistantMessageId: 11,
-        speakerName: '消息投影 Agent',
-        finalPrompt: expect.stringContaining('内嵌消息投影落库')
-      })
-    )
+    expect(insertPromptLog).not.toHaveBeenCalled()
+    expect(result.data.promptLogId).toBe('')
   })
 
   it('内嵌投影解析失败时仍写可见性兜底，避免消息对后续轮次永久隐身', async () => {
@@ -2271,6 +2372,37 @@ describe('workspaceChatAppService', () => {
       virtual_time_base: 1778502600000,
       virtual_time_rate: 0
     }, true)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('滚动会话摘要把更新时间与 messageId watermark 分列持久化', () => {
+    const persist = vi.fn()
+    const updateSessionById = vi.fn()
+    const service = createChatService({
+      persist,
+      chatRepository: {
+        getSessionById: vi.fn((sessionId) => ({ id: sessionId })),
+        listSessionColumns: vi.fn(() => [
+          { name: 'context_summary' },
+          { name: 'last_summary_time' },
+          { name: 'context_summary_message_id' }
+        ]),
+        updateSessionById
+      }
+    })
+
+    const result = service.updateChatSessionById('session_memory', {
+      contextSummary: '较早事实的滚动摘要',
+      lastSummaryTime: '2026-08-18T10:00:00.000Z',
+      contextSummaryMessageId: 42
+    })
+
+    expect(result.ok).toBe(true)
+    expect(updateSessionById).toHaveBeenCalledWith('session_memory', {
+      context_summary: '较早事实的滚动摘要',
+      last_summary_time: '2026-08-18T10:00:00.000Z',
+      context_summary_message_id: 42
+    }, false)
     expect(persist).toHaveBeenCalledTimes(1)
   })
 

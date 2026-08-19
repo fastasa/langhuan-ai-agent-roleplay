@@ -1165,9 +1165,7 @@ const temporaryDataSummary = computed(() => {
 })
 
 const replyPipelineModeOptions: Array<{ value: ChatSessionReplyPipelineMode; label: string }> = [
-  { value: 'normal_recall', label: '普通召回' },
-  { value: 'personality_model', label: '人格模型' },
-  { value: 'fast_reply', label: '快速回复' },
+  { value: 'normal_recall', label: '自动编排' },
   { value: 'pure_prompt', label: '纯净回复' }
 ]
 
@@ -1175,11 +1173,7 @@ const replyPipelineModeSummary = computed(() => {
   const mode = normalizeChatSessionReplyPipelineMode(state.groupEditForm.replyPipelineMode)
   return mode === 'pure_prompt'
     ? '只带可见历史和本次输入，不读召回、旁白和自动写入'
-    : mode === 'fast_reply'
-    ? '仅从正式在场角色中按概率随机发言；先写可见回复，再由提调串行核账'
-    : mode === 'personality_model'
-    ? '按当前回复角色读取消息投影，生成候选计划并评分后回复'
-    : '未单独指定的角色走环境、召回、旁白与自动写入链'
+    : '先轻判情境是否变化：稳定续话直接回复，需要变化或核账时才启动完整提调；角色有已安装人格模型时默认使用人格模型，否则使用普通召回'
 })
 
 const sessionMemberDialogTitle = computed(() => {

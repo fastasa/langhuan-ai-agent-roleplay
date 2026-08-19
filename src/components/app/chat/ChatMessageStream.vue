@@ -25,6 +25,20 @@
         <span>{{ t('common.copy') }}</span>
       </button>
     </div>
+    <!-- 提调坞属于聊天区常驻外壳，不依赖角色/会话数据。空工作区也显示原生细绿条；
+         启动加载或会话切换时暂时隐藏，避免旧会话的坞在骨架屏上闪现。 -->
+    <TidiaoDirectorDock
+      v-if="!isBootLoading && !isSessionSwitching"
+      :rounds="directorDockRounds"
+      :auto-expand="String(replyPipelineMode || '').trim() !== 'fast_reply'"
+      :context-key="directorDockContextKey"
+      :resolve-avatar="getCharAvatar"
+      :resolve-name="resolveCharacterName"
+      :pool-session-id="activeRecallPoolSessionId"
+      :pool-cast-character-ids="recallPoolCastIds"
+      @open-recall="openDirectorRecall"
+      @open-orchestration="openDirectorOrchestration"
+    />
     <div v-if="isBootLoading" class="chat-refresh-loading" :aria-label="t('chat.refreshingChat')">
       <span class="chat-refresh-spinner"></span>
     </div>
@@ -97,25 +111,13 @@
         </div>
       </div>
     </div>
-    <div v-else-if="!currentTarget" style="text-align: center; color: #999; padding: 40px;">
-      {{ t('chat.selectCharToStart') }}
+    <div v-else-if="!currentTarget" class="chat-empty-start">
+      <div class="chat-empty-start__text">{{ t('chat.selectCharToStart') }}</div>
+      <button type="button" class="btn btn-small chat-empty-start__action" @click="$emit('create-first-character')">
+        {{ t('sidebar.addCharacter') }}
+      </button>
     </div>
     <template v-else>
-      <!-- 提调坞（2026-07-04 位置改造）：提调带不再锚在每轮消息上方，统一收进聊天区顶部的常驻坞。
-           坞本体经 Teleport 挂到 ChatWorkspaceSection 的 .tds-dock-host（header 正下方·结构贴顶不随滚动）；
-           收起=95% 宽圆角绿条·运行自动展开成抽屉/跑完自动收起·抽屉绿色底边上可切轮。
-           历史轮 + 活动轮都由 directorDockRounds 供给；带内部 UI（TidiaoDirectorStreamBand）不变。 -->
-      <TidiaoDirectorDock
-        :rounds="directorDockRounds"
-        :auto-expand="String(replyPipelineMode || '').trim() !== 'fast_reply'"
-        :context-key="directorDockContextKey"
-        :resolve-avatar="getCharAvatar"
-        :resolve-name="resolveCharacterName"
-        :pool-session-id="activeRecallPoolSessionId"
-        :pool-cast-character-ids="recallPoolCastIds"
-        @open-recall="openDirectorRecall"
-        @open-orchestration="openDirectorOrchestration"
-      />
       <div
         v-if="hasOlderMessages || loadingOlderMessages || localOlderMessagesLoading"
         class="chat-older-sentinel"
@@ -1982,7 +1984,8 @@ const emit = defineEmits([
   'open-user-editor',
   'open-prompt-log-panel',
   'open-recall-activity-panel',
-  'open-personality-orchestration-audit'
+  'open-personality-orchestration-audit',
+  'create-first-character'
 ])
 
 function resolveMessageId(msg: ChatMessageViewModel) {
@@ -2497,6 +2500,26 @@ function handleAssistantAvatarClick(msg: ChatMessageViewModel, event: MouseEvent
 
 .chat-messages {
   position: relative;
+}
+
+.chat-empty-start {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 40px;
+  color: #999;
+  text-align: center;
+}
+
+.chat-empty-start__action {
+  min-width: 104px;
+  border-color: color-mix(in srgb, var(--morandi-accent) 38%, var(--morandi-border));
+  background: color-mix(in srgb, var(--langhuan-paper-bg) 88%, var(--morandi-accent) 12%);
+  color: var(--morandi-text);
+}
+
+.chat-empty-start__action:hover {
+  border-color: color-mix(in srgb, var(--morandi-accent) 58%, var(--morandi-border));
 }
 
 .chat-older-sentinel {

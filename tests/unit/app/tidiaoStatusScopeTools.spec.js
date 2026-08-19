@@ -17,6 +17,7 @@ import {
   markTidiaoStatusScopeDeclined,
   isTidiaoStatusScopeDeclined,
   clearTidiaoStatusScopeDeclined,
+  buildTidiaoStatusScopeCharacterOptions,
   buildZaoceBrief,
   buildZaoceBatchBrief
 } from '../../../src/app/tidiaoStatusScopeState.ts'
@@ -234,8 +235,21 @@ describe('tidiaoStatusScopeState · pending 生命周期与拒绝记忆（批次
     request: { purpose: '给张元英建角色状态栏', characterHint: '张元英' },
     sessionId: 'session_1',
     anchorMessageId: 42,
-    characterOptions: [{ id: 'char_2', name: '张元英' }]
+    characterOptions: [{ id: 'char_2', participantId: 'participant_2', name: '张元英' }]
   }
+
+  it('确认队列把角色主档 id 与正式 participantId 一起带入造册', () => {
+    const options = buildTidiaoStatusScopeCharacterOptions(
+      [{ characterId: 'char_1786895478788', name: '奥菲利娅' }],
+      new Map([['char_1786895478788', 'participant_session_1786896016793_yrb8u5_0']])
+    )
+
+    expect(options).toEqual([{
+      id: 'char_1786895478788',
+      participantId: 'participant_session_1786896016793_yrb8u5_0',
+      name: '奥菲利娅'
+    }])
+  })
 
   it('pending 生命周期：set 后 ref 可见 → resume 消费（先清 pending 再调 handler·传 selection）', async () => {
     const handled = []
@@ -251,6 +265,9 @@ describe('tidiaoStatusScopeState · pending 生命周期与拒绝记忆（批次
     await resumeTidiaoStatusScopeOrchestration(selection)
     expect(handled).toHaveLength(1)
     expect(handled[0].pending.sessionId).toBe('session_1')
+    expect(handled[0].pending.characterOptions).toEqual([
+      { id: 'char_2', participantId: 'participant_2', name: '张元英' }
+    ])
     expect(handled[0].resolvedItems).toEqual([{ request: PENDING.request, selection }])
     expect(handled[0].declinedRequests).toEqual([])
 
@@ -271,17 +288,28 @@ describe('tidiaoStatusScopeState · pending 生命周期与拒绝记忆（批次
         { purpose: '补齐同行角色状态栏', characterHint: '张元英' },
         { purpose: '补齐同行角色状态栏', characterHint: '沈青梧' }
       ],
-      characterOptions: [{ id: 'char_2', name: '张元英' }, { id: 'char_1', name: '沈青梧' }]
+      characterOptions: [
+        { id: 'char_2', participantId: 'participant_2', name: '张元英' },
+        { id: 'char_1', participantId: 'participant_1', name: '沈青梧' }
+      ]
     })
     const firstSelection = { characterName: '张元英', sessions: [{ title: '夜谈', sessionId: 'session_1' }], docScopeSummary: '' }
     await resumeTidiaoStatusScopeOrchestration(firstSelection)
     expect(handled).toHaveLength(0)
     expect(getTidiaoStatusScopePendingRef().value.request.characterHint).toBe('沈青梧')
     expect(getTidiaoStatusScopePendingRef().value.currentIndex).toBe(1)
+    expect(getTidiaoStatusScopePendingRef().value.characterOptions.map((option) => option.participantId)).toEqual([
+      'participant_2',
+      'participant_1'
+    ])
 
     await resumeTidiaoStatusScopeOrchestration(null)
     expect(getTidiaoStatusScopePendingRef().value).toBeNull()
     expect(handled).toHaveLength(1)
+    expect(handled[0].pending.characterOptions.map((option) => option.participantId)).toEqual([
+      'participant_2',
+      'participant_1'
+    ])
     expect(handled[0].resolvedItems).toEqual([{ request: expect.objectContaining({ characterHint: '张元英' }), selection: firstSelection }])
     expect(handled[0].declinedRequests).toEqual([expect.objectContaining({ characterHint: '沈青梧' })])
     registerTidiaoStatusScopeResumeHandler(null)

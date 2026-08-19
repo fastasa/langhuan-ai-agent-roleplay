@@ -11,7 +11,6 @@ export const sidebar = {
   filterCrowd: 'Crowd characters',
   filterArchived: 'Archived',
   createSession: 'New chat',
-  emptySessions: 'No chats yet',
   navContacts: 'Chats',
   navRoles: 'Characters',
   navDocs: 'Doc Library',

@@ -27,6 +27,8 @@ export const chat = {
   openMapViewer: 'Open map viewer',
   scriptWorkspace: 'Script',
   openScriptWorkspace: 'Open script workspace',
+  selectCharacterFirst: 'Create or select a character first',
+  selectSessionFirst: 'Create or select a conversation first',
   mapWorldPickerHint: 'Pick or create a world (shared root for map & status panels)',
   mapWorldNone: 'No world yet',
   mapWorldPickerDesc: 'Maps and status panels belong to a world; sessions joining the same world share the same map.',

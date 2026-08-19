@@ -27,6 +27,8 @@ export const chat = {
   openMapViewer: '輿図を開く',
   scriptWorkspace: '脚本',
   openScriptWorkspace: '脚本ワークスペースを開く',
+  selectCharacterFirst: '先にキャラクターを作成または選択してください',
+  selectSessionFirst: '先に会話を作成または選択してください',
   mapWorldPickerHint: 'ワールドを選択・作成（地図とステータスの共有ルート）',
   mapWorldNone: 'ワールド未参加',
   mapWorldPickerDesc: '地図とステータスはワールドに属します。同じワールドに入ったセッション同士で同じ地図を共有できます。',

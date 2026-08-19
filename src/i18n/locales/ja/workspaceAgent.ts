@@ -18,6 +18,7 @@ export const workspaceAgent = {
   modelPickerFollowPreset: 'スロット設定に従う',
   modelPickerDefaultEffort: 'デフォルト',
   modelPickerDefaultEffortWithValue: 'デフォルト（{effort}）',
+  modelPickerSlotEffortWithValue: 'スロットに従う（{effort}）',
   modelSlot: {
     fast: '書童',
     balanced: '校書',

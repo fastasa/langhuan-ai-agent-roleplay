@@ -8,6 +8,9 @@ vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
+    // service 的间接依赖会初始化本地密钥；本测试把 readFileSync 改成 mock 后，
+    // 也必须让 existsSync 与这套虚拟文件系统一致，避免真实文件存在却读到 undefined。
+    existsSync: vi.fn(() => false),
     readdirSync: vi.fn(),
     readFileSync: vi.fn(),
     mkdirSync: vi.fn(),

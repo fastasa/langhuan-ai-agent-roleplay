@@ -24,9 +24,12 @@ describe('提调知识库·渐进披露注入', () => {
     expect(constantBlock).toContain('速览索引') // 2.0 索引
     expect(constantBlock).toContain('先识别运行形态')
     expect(constantBlock).toContain('普通前置统筹')
-    expect(constantBlock).toContain('快速回复/动作输入后的轮后收束')
+    expect(constantBlock).toContain('动作输入或明确变化后的轮后收束')
     expect(constantBlock).toContain('动作输入前台规划')
     expect(constantBlock).toContain('你不写最终正文')
+    expect(constantBlock).toContain('用户私密指令：本轮最高优先级')
+    expect(constantBlock).toContain('私密指令的**优先级高于一切**')
+    expect(constantBlock).toContain('一旦冲突，私密指令优先')
     expect(constantBlock).toContain('角色计划与方向：性格第一')
     expect(constantBlock).toContain('角色性格是最高优先级的创作判断')
   })

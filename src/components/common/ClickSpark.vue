@@ -155,6 +155,12 @@ function handlePointerDown(event: PointerEvent) {
   const canvas = canvasRef.value
   if (!canvas) return
 
+  // 点击火花只服务普通左键浏览。右键会用于原生菜单里的复制/粘贴，
+  // 输入控件也需要把全部主线程时间留给选区、输入法和长正文粘贴。
+  if (event.button !== 0) return
+  const target = event.target
+  if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return
+
   const x = event.clientX
   const y = event.clientY
   const now = performance.now()

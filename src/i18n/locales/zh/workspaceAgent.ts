@@ -18,6 +18,7 @@ export const workspaceAgent = {
   modelPickerFollowPreset: '跟随槽位预设',
   modelPickerDefaultEffort: '默认',
   modelPickerDefaultEffortWithValue: '默认（{effort}）',
+  modelPickerSlotEffortWithValue: '跟随槽位（{effort}）',
   modelSlot: {
     fast: '书童',
     balanced: '校书',

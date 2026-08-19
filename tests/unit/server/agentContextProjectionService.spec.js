@@ -277,4 +277,40 @@ describe('Agent 上下文供给服务', () => {
     const result = await service.resolve({ agentKind: 'role_reply', sessionId: 's1', userId: 'u1', workspaceId: 'default', characterId: 'beggar' })
     expect(result).toMatchObject({ ok: false, status: 500, error: '角色聊天投影来源没有按当前角色可见范围过滤' })
   })
+
+  it('相同配方、锚点与来源修订复用逐字稳定 bundle，来源变化后自然失效', async () => {
+    let sourceRevision = '甲'
+    let nowTick = 0
+    const service = createAgentContextProjectionService({
+      now: () => `2026-07-16T02:00:0${nowTick++}.000Z`,
+      loadSource: () => ({
+        session,
+        participants,
+        presences,
+        projections: [{
+          id: 'projection-cache', messageId: 1, status: 'complete', speakerId: 'user', speakerName: '用户',
+          objectiveFact: `版本${sourceRevision}`, updatedAt: sourceRevision
+        }],
+        chatProjectionVisibility: { kind: 'all' },
+        statusTemplates: [], statusPanels: [], narrativeSeeds: [], narrativeSeedsSelected: true
+      })
+    })
+    const input = { agentKind: 'focused_action', sessionId: 's1', userId: 'u1', workspaceId: 'default', anchorMessageId: 1 }
+    const first = await service.resolve(input)
+    expect(first.ok).toBe(true)
+    first.data.omitted.push({ kind: 'status.panels', reason: 'caller-mutation' })
+
+    const second = await service.resolve(input)
+    expect(second.ok).toBe(true)
+    expect(second.data.generatedAt).toBe('2026-07-16T02:00:00.000Z')
+    expect(second.data.omitted).not.toContainEqual({ kind: 'status.panels', reason: 'caller-mutation' })
+    expect(service.getCacheStats()).toMatchObject({ entries: 1, hits: 1, misses: 1, writes: 1 })
+
+    sourceRevision = '乙'
+    const third = await service.resolve(input)
+    expect(third.ok).toBe(true)
+    expect(third.data.generatedAt).toBe('2026-07-16T02:00:01.000Z')
+    expect(JSON.stringify(third.data)).toContain('版本乙')
+    expect(service.getCacheStats()).toMatchObject({ entries: 2, hits: 1, misses: 2, writes: 2 })
+  })
 })

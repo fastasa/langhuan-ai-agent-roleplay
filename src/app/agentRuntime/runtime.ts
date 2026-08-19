@@ -26,8 +26,25 @@ import {
   matchToolsByQuery,
   resolveResultClampChars,
   type ToolDefinition,
-  type ToolExecutionContext
+  type ToolExecutionContext,
+  type ToolResultSurfacePressure
 } from './toolRegistry'
+import {
+  measureContextPressure,
+  readProviderContextUsage,
+  type ContextPressureMeasurement,
+  type ProviderContextUsageAnchor
+} from './contextPressure'
+import {
+  createAgentRuntimeJournalRecorder,
+  type AgentRuntimeJournalAdapter,
+  type AgentRuntimeJournalEventKind
+} from './runtimeJournal'
+import {
+  buildSemanticCompactionRecord,
+  toolResultOutcomeUnknown,
+  type SemanticCompactionRecord
+} from './semanticCompaction'
 import { runWithConcurrencyPool } from '../../utils/concurrencyPool'
 // 人在环上统一契约（2026-07-12 架构审查批C）：halt 模式信封类型，仅 import 类型（不编辑该文件，见头注释三种投递模式）。
 import type { InteractionRequest } from './interactionContract'
@@ -145,6 +162,16 @@ export type AgentRuntimeFidelityEvent =
   | { kind: 'assistant-message'; content: string; turnIndex: number }
   | { kind: 'tool-call'; toolCall: ToolCallMessage; turnIndex: number }
   | { kind: 'tool-result'; toolResult: ToolResultMessage; turnIndex: number }
+  | { kind: 'semantic-compaction'; record: SemanticCompactionRecord; turnIndex: number }
+  | {
+      kind: 'journal-error'
+      runId: string
+      seq: number
+      journalEventKind: AgentRuntimeJournalEventKind
+      checksum: string
+      message: string
+      turnIndex: number
+    }
 
 /** 工具入参 → 展示文本（通用，不绑定具体工具）：挑常见键名，回退首个非空字符串值。
  *  不再硬截断——带全文给提调决策流，由前端折叠+点击展开看全文（用户 2026-06-20）。 */
@@ -171,6 +198,39 @@ export interface RunAgentRuntimeInput {
   runtimeVersion?: string
   messages: AgentRuntimeMessage[]
   toolRegistry: ToolRegistry
+  /**
+   * Optional pressure-aware surface policy. Omission preserves the existing resultClampChars
+   * behavior exactly. When present, runtime anchors to provider usage whenever callModel returns it
+   * and otherwise falls back to a conservative CJK/JSON-aware local estimate.
+   */
+  contextPressure?: {
+    contextWindowTokens: number
+    thresholdRatio?: number
+    reserveTokens?: number
+    toolResultPruning?: {
+      enabled?: boolean
+      thresholdChars?: number
+      headChars?: number
+      tailChars?: number
+    }
+    /** Structured checkpoint only; it is returned/journaled and never injected into model messages. */
+    semanticCompaction?: {
+      enabled?: boolean
+      runId?: string
+      goal?: string
+      keyConclusions?: string[]
+      recentTailItems?: number
+    }
+  }
+  /** Optional append-only persistence. Omission keeps the pre-journal runtime path unchanged. */
+  journal?: {
+    runId: string
+    adapter: AgentRuntimeJournalAdapter
+    initialSeq?: number
+    now?: () => string | number | Date
+    /** Host-owned resume identity, e.g. profile/persona/prompt/tool-catalog digests. */
+    metadata?: Record<string, unknown>
+  }
   hookRegistry?: HookRegistry
   initialActiveTools: string[]
   /** 正式交互 Agent 默认不传；显式设置只供确有成本/时限边界的 mini agent 与专项流程。 */
@@ -182,7 +242,7 @@ export interface RunAgentRuntimeInput {
     messages: AgentRuntimeMessage[]
     history: AgentRuntimeHistoryMessage[]
     activeTools: string[]
-    toolBriefs: Array<{ name: string; brief: string; schema?: Record<string, unknown> }>
+    toolBriefs: Array<{ name: string; brief: string; order?: number; schema?: Record<string, unknown> }>
     /** R1-B B5（统一 toolsearch）：延迟模式下「全局单可搜目录」（name+brief·不带 schema·推荐单标 recommended），
      *  供提调侧 callModel 渲染进 prompt 让模型知道有哪些工具可 toolsearch 调出来。非延迟模式不传。 */
     toolCatalog?: Array<{ name: string; brief: string; recommended: boolean }>
@@ -254,6 +314,20 @@ export interface RunAgentRuntimeResult {
   taskTodo: AgentTaskTodoSnapshot
   /** 本轮最终经 toolsearch 激活的业务工具名；不含 runtime 保留工具。 */
   deferredActiveTools: string[]
+  /** Present only when semantic compaction was explicitly enabled and pressure actually triggered. */
+  semanticCompactions?: SemanticCompactionRecord[]
+  /** Present only when a journal adapter was configured. */
+  journalState?: {
+    runId: string
+    lastSeq: number
+    appendFailures: Array<{
+      runId: string
+      seq: number
+      kind: AgentRuntimeJournalEventKind
+      checksum: string
+      message: string
+    }>
+  }
 }
 
 export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunAgentRuntimeResult> {
@@ -264,6 +338,40 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
     content: message.content
   }))
   const turns: AgentTranscriptTurn[] = []
+  const semanticCompactions: SemanticCompactionRecord[] = []
+  const journalRecorder = input.journal
+    ? createAgentRuntimeJournalRecorder({
+        runId: input.journal.runId,
+        adapter: input.journal.adapter,
+        ...(input.journal.initialSeq == null ? {} : { initialSeq: input.journal.initialSeq }),
+        ...(input.journal.now ? { now: input.journal.now } : {}),
+        onAppendFailure: (failure) => {
+          // The persistence path is deliberately fail-soft. The fidelity callback gets an audit
+          // event, but even a callback failure here cannot terminate the primary Agent run.
+          try {
+            input.onEvent?.({
+              kind: 'journal-error',
+              runId: failure.runId,
+              seq: failure.seq,
+              journalEventKind: failure.kind,
+              checksum: failure.checksum,
+              message: failure.message,
+              turnIndex: Math.max(0, turns.length - 1)
+            })
+          } catch {
+            /* fail-soft journal diagnostics */
+          }
+        }
+      })
+    : null
+  journalRecorder?.append('run.started', {
+    agentName: input.agentName,
+    runtimeVersion: input.runtimeVersion ?? 'agent-runtime-batch1',
+    initialActiveTools: [...input.initialActiveTools],
+    initialMessages: messages,
+    ...(input.journal?.metadata ? { metadata: input.journal.metadata } : {}),
+    resumed: Number(input.journal?.initialSeq || 0) > 0
+  })
   const maxTurns = normalizeRuntimeBudgetLimit(input.budget?.maxTurns)
   const maxToolCalls = normalizeRuntimeBudgetLimit(input.budget?.maxToolCalls)
   const budgetTrace: AgentRuntimeBudgetTrace = {
@@ -352,6 +460,8 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
   )
   let toolEpoch = freezeFullAuthorizedTools && initialRestoredDeferredTools.length ? 1 : 0
   let toolEpochTurnIndex = 0
+  let providerUsageAnchor: ProviderContextUsageAnchor | null = null
+  let providerUsageSurface: string | undefined
   const emitDeferredActiveTools = (): void => {
     if (!deferredMode) return
     input.onDeferredActiveToolsChange?.(
@@ -498,7 +608,149 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
     }
   }
   // R3-2 保真事件上抛（append log 源）：不传 onEvent 时为空操作，默认行为零变化。
-  const emitEvent = (event: AgentRuntimeFidelityEvent): void => { input.onEvent?.(event) }
+  const appendFidelityEventToJournal = (event: AgentRuntimeFidelityEvent): void => {
+    if (!journalRecorder || event.kind === 'journal-error') return
+    if (event.kind === 'assistant-message') {
+      journalRecorder.append('assistant.completed', {
+        turnIndex: event.turnIndex,
+        content: event.content
+      }, { completionAnchor: true })
+      return
+    }
+    if (event.kind === 'tool-call') {
+      const definition = effectiveRegistry.get(event.toolCall.toolName)
+      journalRecorder.append('tool.started', {
+        turnIndex: event.turnIndex,
+        callId: event.toolCall.callId,
+        toolName: event.toolCall.toolName,
+        status: 'started',
+        stage: event.toolCall.stage,
+        args: event.toolCall.args,
+        expectation: event.toolCall.expectation,
+        requestedAtTurn: event.toolCall.requestedAtTurn,
+        mayHaveSideEffects: definition ? definition.mayHaveSideEffects !== false : false
+      })
+      return
+    }
+    if (event.kind === 'tool-result') {
+      const result = event.toolResult
+      const definition = effectiveRegistry.get(result.toolName)
+      const outcomeUnknown = toolResultOutcomeUnknown(result)
+      const kind: AgentRuntimeJournalEventKind = result.error?.type === 'TOOL_TIMEOUT'
+        ? 'tool.timed_out'
+        : result.status === 'success'
+          ? 'tool.completed'
+          : 'tool.failed'
+      journalRecorder.append(kind, {
+        turnIndex: event.turnIndex,
+        callId: result.callId,
+        toolName: result.toolName,
+        stage: result.stage,
+        status: kind === 'tool.completed'
+          ? 'completed'
+          : kind === 'tool.timed_out'
+            ? 'timed_out'
+            : 'failed',
+        runtimeStatus: result.status,
+        content: result.content,
+        details: result.details,
+        ...(result.error ? { error: result.error } : {}),
+        ...(typeof result.acted === 'boolean' ? { acted: result.acted } : {}),
+        mayHaveSideEffects: definition ? definition.mayHaveSideEffects !== false : false,
+        outcomeUnknown
+      }, { completionAnchor: true })
+      return
+    }
+    if (event.kind === 'semantic-compaction') {
+      journalRecorder.append('semantic_compaction.created', {
+        turnIndex: event.turnIndex,
+        record: event.record
+      }, { completionAnchor: true })
+    }
+  }
+  const emitEvent = (event: AgentRuntimeFidelityEvent): void => {
+    appendFidelityEventToJournal(event)
+    input.onEvent?.(event)
+  }
+  const measureRuntimeContextPressure = (
+    currentSurface: string
+  ): ContextPressureMeasurement | undefined => {
+    const pressureConfig = input.contextPressure
+    if (!pressureConfig) return undefined
+    return measureContextPressure({
+      contextWindowTokens: pressureConfig.contextWindowTokens,
+      currentSurface,
+      ...(providerUsageSurface ? { anchorSurface: providerUsageSurface } : {}),
+      providerUsage: providerUsageAnchor,
+      ...(pressureConfig.thresholdRatio == null
+        ? {}
+        : { thresholdRatio: pressureConfig.thresholdRatio }),
+      ...(pressureConfig.reserveTokens == null
+        ? {}
+        : { reserveTokens: pressureConfig.reserveTokens })
+    })
+  }
+  let semanticCompactionCreated = false
+  const maybeCreateSemanticCompaction = (
+    measurement: ContextPressureMeasurement | undefined,
+    turnIndex: number
+  ): void => {
+    const config = input.contextPressure?.semanticCompaction
+    if (!measurement?.underPressure || !config || config.enabled === false || semanticCompactionCreated) return
+    semanticCompactionCreated = true
+    const sideEffectToolNames = new Set(
+      effectiveRegistry.list()
+        .filter((definition) => definition.mayHaveSideEffects !== false)
+        .map((definition) => definition.name)
+    )
+    const record = buildSemanticCompactionRecord({
+      runId: String(config.runId || input.journal?.runId || `untracked:${input.agentName}`),
+      history,
+      pressure: {
+        projectedTokens: measurement.projectedTokens,
+        pressureTokens: measurement.pressureTokens,
+        pressureRatio: measurement.pressureRatio,
+        contextWindowTokens: measurement.contextWindowTokens,
+        thresholdTokens: measurement.thresholdTokens,
+        source: measurement.source
+      },
+      ...(config.goal == null ? {} : { goal: config.goal }),
+      ...(config.keyConclusions == null ? {} : { keyConclusions: config.keyConclusions }),
+      sideEffectToolNames,
+      ...(config.recentTailItems == null ? {} : { recentTailItems: config.recentTailItems }),
+      ...(input.journal?.now ? { now: input.journal.now() } : {})
+    })
+    semanticCompactions.push(record)
+    emitEvent({ kind: 'semantic-compaction', record, turnIndex })
+  }
+  const resolveToolResultSurfacePressure = (
+    result: ToolResultMessage,
+    native: boolean
+  ): ToolResultSurfacePressure | undefined => {
+    const pressureConfig = input.contextPressure
+    if (!pressureConfig) return undefined
+    const rawToolMessage = buildToolResultChatMessage(result, native, result.content)
+    const currentSurface = serializeContextSurface(
+      [...messages, rawToolMessage],
+      effectiveRegistry.listBriefs(activeTools),
+      deferredMode ? input.toolRegistry.listCatalog(input.recommendedTools) : undefined
+    )
+    const measurement = measureRuntimeContextPressure(currentSurface)
+    maybeCreateSemanticCompaction(measurement, Math.max(0, turns.length - 1))
+    if (!measurement || pressureConfig.toolResultPruning?.enabled === false) return undefined
+    return {
+      underPressure: measurement.underPressure,
+      ...(pressureConfig.toolResultPruning?.thresholdChars == null
+        ? {}
+        : { thresholdChars: pressureConfig.toolResultPruning.thresholdChars }),
+      ...(pressureConfig.toolResultPruning?.headChars == null
+        ? {}
+        : { headChars: pressureConfig.toolResultPruning.headChars }),
+      ...(pressureConfig.toolResultPruning?.tailChars == null
+        ? {}
+        : { tailChars: pressureConfig.toolResultPruning.tailChars })
+    }
+  }
   const hookRegistry = new HookRegistry([
     ...(taskTodoEnabled ? [taskTodoGuardHook] : []),
     ...(input.hookRegistry?.list() ?? []),
@@ -549,36 +801,51 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
       break
     }
 
+    // 层6 是每轮变化的运行态，永远只进本次调用快照末尾，不写回稳定 system 前缀或长期 messages。
+    const requestMessages: AgentRuntimeMessage[] = [
+      ...messages.map((message) => ({ ...message })),
+      ...(taskTodoEnabled
+        ? [{
+            role: 'user' as const,
+            content: renderAgentTaskTodoLayer(taskTodo.snapshot(), {
+              ...(maxTurns == null
+                ? {}
+                : { remainingTurns: Math.max(0, maxTurns - turnIndex) }),
+              ...(maxToolCalls == null
+                ? {}
+                : { remainingToolCalls: Math.max(0, maxToolCalls - budgetTrace.usedToolCalls) })
+            })
+          }]
+        : [])
+    ]
+    // R1-B B5 延迟模式：native 工具数组只下发已激活集（activeTools=initialActiveTools+toolsearch+已搜激活·带 schema），
+    //   其余走 toolCatalog（name+brief）让模型按需 toolsearch。非延迟（现役）：仅列当前阶段 activeTools。
+    const requestToolBriefs = effectiveRegistry.listBriefs(activeTools)
+    const requestToolCatalog = deferredMode
+      ? input.toolRegistry.listCatalog(input.recommendedTools)
+      : undefined
+    // The anchor surface intentionally excludes the ephemeral TODO layer. Provider inputTokens
+    // still includes it, while surface deltas track only persisted messages/tool schemas.
+    const requestSurface = serializeContextSurface(messages, requestToolBriefs, requestToolCatalog)
+    maybeCreateSemanticCompaction(measureRuntimeContextPressure(requestSurface), turnIndex)
+    // Optional journal acts as a checkpoint at model boundaries. Adapter failures are already
+    // converted to audit events by the recorder, so this wait cannot suppress the primary run.
+    await journalRecorder?.flush()
     const rawOutput = await input.callModel({
-      // 层6 是每轮变化的运行态，永远只进本次调用快照末尾，不写回稳定 system 前缀或长期 messages。
-      messages: [
-        ...messages.map((message) => ({ ...message })),
-        ...(taskTodoEnabled
-          ? [{
-              role: 'user' as const,
-              content: renderAgentTaskTodoLayer(taskTodo.snapshot(), {
-                ...(maxTurns == null
-                  ? {}
-                  : { remainingTurns: Math.max(0, maxTurns - turnIndex) }),
-                ...(maxToolCalls == null
-                  ? {}
-                  : { remainingToolCalls: Math.max(0, maxToolCalls - budgetTrace.usedToolCalls) })
-              })
-            }]
-          : [])
-      ],
+      messages: requestMessages,
       history: history.map((message) => ({ ...message })),
       activeTools: [...activeTools],
-      // R1-B B5 延迟模式：native 工具数组只下发已激活集（activeTools=initialActiveTools+toolsearch+已搜激活·带 schema），
-      //   其余走 toolCatalog（name+brief）让模型按需 toolsearch。非延迟（现役）：仅列当前阶段 activeTools。
-      toolBriefs: effectiveRegistry.listBriefs(activeTools),
-      ...(deferredMode
-        ? { toolCatalog: input.toolRegistry.listCatalog(input.recommendedTools) }
-        : {}),
+      toolBriefs: requestToolBriefs,
+      ...(requestToolCatalog ? { toolCatalog: requestToolCatalog } : {}),
       turnIndex,
       toolEpoch,
       toolEpochTurnIndex
     })
+    const reportedUsage = readProviderContextUsage(rawOutput)
+    if (reportedUsage) {
+      providerUsageAnchor = reportedUsage
+      providerUsageSurface = requestSurface
+    }
     toolEpochTurnIndex += 1
     const parsed = (input.parseModelOutput ?? parseJsonModelOutput)(rawOutput, turnIndex)
     const modelMessage = toModelMessage(rawOutput, parsed)
@@ -755,6 +1022,8 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
       // 阶段②：就绪项整批并发 execute（保序由并发池返回值保证）
       const readyPlans = plans.filter((plan) => !plan.blockedResult)
       const batchActiveTools = [...activeTools]
+      // Persist every tool.started envelope before any member of the side-effect-capable batch runs.
+      await journalRecorder?.flush()
       const poolResults = await runWithConcurrencyPool(
         readyPlans,
         async (plan) => {
@@ -797,7 +1066,12 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
         if (plan.blockedResult) {
           turn.toolResults.push(plan.blockedResult)
           history.push(plan.blockedResult)
-          messages.push(toolResultToChatMessage(plan.blockedResult, turnUsesNativeTools, effectiveRegistry))
+          messages.push(toolResultToChatMessage(
+            plan.blockedResult,
+            turnUsesNativeTools,
+            effectiveRegistry,
+            resolveToolResultSurfacePressure(plan.blockedResult, turnUsesNativeTools)
+          ))
           // R3-2：blocked 结果也是保真事件（工具不可用/预算拦截），append 进 log 供报错诊断（R3-5）。
           emitEvent({ kind: 'tool-result', toolResult: plan.blockedResult, turnIndex })
           continue
@@ -816,7 +1090,12 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
         if (afterToolOutput.patchedToolResult) result = afterToolOutput.patchedToolResult
         turn.toolResults.push(result)
         history.push(result)
-        messages.push(toolResultToChatMessage(result, turnUsesNativeTools, effectiveRegistry))
+        messages.push(toolResultToChatMessage(
+          result,
+          turnUsesNativeTools,
+          effectiveRegistry,
+          resolveToolResultSurfacePressure(result, turnUsesNativeTools)
+        ))
         // R3-2：工具结果（含 content+details+error）append 进保真 log；details 按字段生命周期标签压缩留检索（R3-3 读）。
         emitEvent({ kind: 'tool-result', toolResult: result, turnIndex })
         applyHookOutputToTurn(afterToolOutput, turn, history, turnInjectSink)
@@ -881,7 +1160,12 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
           )
           turn.toolResults.push(blockedResult)
           history.push(blockedResult)
-          messages.push(toolResultToChatMessage(blockedResult, turnUsesNativeTools, effectiveRegistry))
+          messages.push(toolResultToChatMessage(
+            blockedResult,
+            turnUsesNativeTools,
+            effectiveRegistry,
+            resolveToolResultSurfacePressure(blockedResult, turnUsesNativeTools)
+          ))
           // R3-2：blocked 结果也是保真事件，append 进 log 供报错诊断（R3-5）。
           emitEvent({ kind: 'tool-result', toolResult: blockedResult, turnIndex })
           if (retryRequestedThisTurn) break
@@ -896,13 +1180,21 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
           })
           turn.toolResults.push(budgetResult)
           history.push(budgetResult)
-          messages.push(toolResultToChatMessage(budgetResult, turnUsesNativeTools, effectiveRegistry))
+          messages.push(toolResultToChatMessage(
+            budgetResult,
+            turnUsesNativeTools,
+            effectiveRegistry,
+            resolveToolResultSurfacePressure(budgetResult, turnUsesNativeTools)
+          ))
           // R3-2：预算拦截结果也是保真事件，append 进 log 供报错诊断（R3-5）。
           emitEvent({ kind: 'tool-result', toolResult: budgetResult, turnIndex })
           terminalReason = 'budget-exceeded'
           continue
         }
 
+        // Persist tool.started before execution. Recovery can then report a pending/unknown call if
+        // the process dies after the external side effect but before its terminal result is logged.
+        await journalRecorder?.flush()
         let result = noteRepeatedIdenticalResult(toolCall, noteRepeatedToolError(await executeToolCall(toolCall, {
           registry: effectiveRegistry,
           activeTools,
@@ -921,7 +1213,12 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
         if (afterToolOutput.patchedToolResult) result = afterToolOutput.patchedToolResult
         turn.toolResults.push(result)
         history.push(result)
-        messages.push(toolResultToChatMessage(result, turnUsesNativeTools, effectiveRegistry))
+        messages.push(toolResultToChatMessage(
+          result,
+          turnUsesNativeTools,
+          effectiveRegistry,
+          resolveToolResultSurfacePressure(result, turnUsesNativeTools)
+        ))
         // R3-2：工具结果（含 content+details+error）append 进保真 log；details 按字段生命周期标签压缩留检索（R3-3 读）。
         emitEvent({ kind: 'tool-result', toolResult: result, turnIndex })
         applyHookOutputToTurn(afterToolOutput, turn, history, turnInjectSink)
@@ -1102,12 +1399,26 @@ export async function runAgentRuntime(input: RunAgentRuntimeInput): Promise<RunA
     })
   }
 
+  journalRecorder?.append('run.completed', {
+    agentName: input.agentName,
+    terminalReason,
+    usedTurns: budgetTrace.usedTurns,
+    usedToolCalls: budgetTrace.usedToolCalls,
+    semanticCompactionIds: semanticCompactions.map((record) => record.id)
+  }, { completionAnchor: true })
+  await journalRecorder?.flush()
+  const journalState = journalRecorder?.snapshot()
+
   return {
     messages,
     ...(pendingInteraction ? { pendingInteraction } : {}),
     ...(pendingSubagentWait ? { pendingSubagentWait } : {}),
     taskTodo: taskTodo.snapshot(),
     deferredActiveTools: Array.from(deferredActivated).filter((name) => !isRuntimeMetaTool(name)),
+    ...(semanticCompactions.length
+      ? { semanticCompactions: semanticCompactions.map((record) => ({ ...record })) }
+      : {}),
+    ...(journalState ? { journalState } : {}),
     transcript: {
       kind: 'agentTranscript',
       agentName: input.agentName,
@@ -1209,12 +1520,25 @@ function applyHookOutputToTurn(
 /** 边界真值：模型每轮只接收 messages（callModel 的 messages 入参），history 仅供审计与 hook。
  *  toolResult 与 hook 注入指令必须同步序列化进 messages，否则模型看不到工具反馈与阶段协议、
  *  只能按系统提示词盲打（2026-06-10 普通召回单计划 generatePlanBatch 全被参数校验拒绝的根因）。 */
-function toolResultToChatMessage(result: ToolResultMessage, native = false, registry?: ToolRegistry): AgentRuntimeMessage {
+function toolResultToChatMessage(
+  result: ToolResultMessage,
+  native = false,
+  registry?: ToolRegistry,
+  pressure?: ToolResultSurfacePressure
+): AgentRuntimeMessage {
   // 结果中央钳制（2026-07-12 架构审查批B）：只钳制回灌模型的 content，registry 缺省时按默认阈值钳（不传
   // registry 的调用方视为无工具定义可查）。history.push(result) 与 emitEvent(...result) 都发生在本函数
   // 调用之前、拿的是未钳制的原始 result 对象——保真事件与审计全文不受影响，只有这里构造的 chat message 被钳。
   const clampChars = resolveResultClampChars(registry?.get(result.toolName))
-  const content = clampToolResultContent(result.content, clampChars)
+  const content = clampToolResultContent(result.content, clampChars, pressure)
+  return buildToolResultChatMessage(result, native, content)
+}
+
+function buildToolResultChatMessage(
+  result: ToolResultMessage,
+  native: boolean,
+  content: string
+): AgentRuntimeMessage {
   // 原生感知条件回灌：native 轮用原生 role:'tool' + tool_call_id（与 assistant.tool_calls 配对，OpenAI 协议要求）；
   // 非 native（迁移期 content-JSON loop）维持旧的 role:'user' JSON 回灌，行为零变化。
   if (native) {
@@ -1235,6 +1559,18 @@ function toolResultToChatMessage(result: ToolResultMessage, native = false, regi
       ...(result.error ? { error: { type: result.error.type, message: result.error.message } } : {})
     })
   }
+}
+
+function serializeContextSurface(
+  messages: AgentRuntimeMessage[],
+  toolBriefs: Array<{ name: string; brief: string; order?: number; schema?: Record<string, unknown> }>,
+  toolCatalog?: Array<{ name: string; brief: string; recommended: boolean }>
+): string {
+  return JSON.stringify({
+    messages,
+    tools: toolBriefs,
+    ...(toolCatalog ? { toolCatalog } : {})
+  })
 }
 
 // 原生轮的 assistant 消息：携带 tool_calls（id 即 callId，与回灌的 role:'tool'+tool_call_id 配对）。
@@ -1348,8 +1684,9 @@ async function executeToolCall(
     })
   }
 
-  // longRunning 工具（等用户交互 / 派发子 agent 长任务）完全免超时：耗时不可预测，走原始直调不设竞速。
-  if (definition.longRunning) {
+  // longRunning and explicit timeoutMs:null remain deadline-free for backward compatibility.
+  const timeoutMs = resolveToolExecuteTimeoutMs(definition)
+  if (timeoutMs == null) {
     try {
       const result = await definition.execute(toolCall, input.ctx)
       return adaptToolExecutionResult(toolCall, result)
@@ -1361,43 +1698,79 @@ async function executeToolCall(
     }
   }
 
-  // 单工具默认执行超时（2026-07-12 架构审查批B）：execute 卡死/网络挂起不能让整条 loop 无限等待。
-  // Promise.resolve().then(...) 把同步 throw 也转成 rejected promise，统一走下面 catch；超时不 throw——
-  // 回落成错误型结果，loop 按正常错误结果继续跑下一步。定时器必须在 execute 落定（成功/失败/超时任一先到）
-  // 后清理，避免 race 输家的 timer 泄漏；abort 语义不变——超时只是新增的另一种竞速者，谁先到算谁。
+  // Each timed tool receives a derived signal linked to the parent signal and this deadline. A
+  // cooperative tool can stop its own I/O; Promise.race remains the guard for legacy tools that do
+  // not yet observe AbortSignal. The original caller-owned signal is never aborted by runtime.
+  const deadlineController = new AbortController()
+  const parentSignal = input.ctx.signal
+  const abortFromParent = (): void => { deadlineController.abort() }
+  parentSignal?.addEventListener('abort', abortFromParent, { once: true })
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+  let didTimeout = false
   const timeoutSentinel = Symbol('agentRuntimeToolTimeout')
   const timeoutPromise = new Promise<typeof timeoutSentinel>((resolve) => {
-    timeoutTimer = setTimeout(() => resolve(timeoutSentinel), DEFAULT_TOOL_EXECUTE_TIMEOUT_MS)
+    timeoutTimer = setTimeout(() => {
+      didTimeout = true
+      deadlineController.abort()
+      resolve(timeoutSentinel)
+    }, timeoutMs)
   })
+  const timeoutResult = (): ToolResultMessage => makeToolErrorResult(
+    toolCall,
+    'TOOL_TIMEOUT',
+    `工具执行超时：「${toolCall.toolName}」超过 ${timeoutMs}ms 未返回结果，已请求取消并继续下一步。`,
+    {
+      retryable: false,
+      details: {
+        timedOut: true,
+        timeoutMs,
+        abortRequested: true,
+        outcomeUnknown: definition.mayHaveSideEffects !== false
+      }
+    }
+  )
   try {
-    const executePromise = Promise.resolve().then(() => definition.execute(toolCall, input.ctx))
+    const executePromise = Promise.resolve().then(() => definition.execute(toolCall, {
+      ...input.ctx,
+      signal: deadlineController.signal
+    }))
     const raced = await Promise.race([executePromise, timeoutPromise])
-    if (raced === timeoutSentinel) {
+    if (raced === timeoutSentinel || didTimeout) {
       // 竞速输家兜底：execute 在超时判定后才 reject 的话已无人 await，必须吞掉避免 unhandledrejection 噪声。
       executePromise.catch(() => {})
-      // retryable 不设 true：自动重试一个刚超时的调用大概率再等满 300s，白耗预算；是否重试交模型自己判断。
-      return makeToolErrorResult(
-        toolCall,
-        'TOOL_RUNTIME_ERROR',
-        `工具执行超时：「${toolCall.toolName}」超过 ${DEFAULT_TOOL_EXECUTE_TIMEOUT_MS}ms 未返回结果，已跳过继续下一步。`,
-        { details: { timedOut: true, timeoutMs: DEFAULT_TOOL_EXECUTE_TIMEOUT_MS } }
-      )
+      return timeoutResult()
     }
     return adaptToolExecutionResult(toolCall, raced)
   } catch (error) {
+    if (didTimeout) return timeoutResult()
+    if (parentSignal?.aborted) {
+      return makeToolErrorResult(toolCall, 'ABORTED', '工具执行期间已取消', {
+        status: 'blocked',
+        retryable: false,
+        details: { outcomeUnknown: definition.mayHaveSideEffects !== false }
+      })
+    }
     const message = error instanceof Error ? error.message : String(error)
     return makeToolErrorResult(toolCall, 'TOOL_RUNTIME_ERROR', message, {
       details: { thrown: true }
     })
   } finally {
-    clearTimeout(timeoutTimer)
+    if (timeoutTimer) clearTimeout(timeoutTimer)
+    parentSignal?.removeEventListener('abort', abortFromParent)
   }
 }
 
 /** 单工具默认执行超时（ms，2026-07-12 架构审查批B；同日拍板 120s→300s 延长为 5 分钟）：
  *  普通工具默认 5 分钟；definition.longRunning 为 true 的工具完全不受此限制。 */
 export const DEFAULT_TOOL_EXECUTE_TIMEOUT_MS = 300000
+
+export function resolveToolExecuteTimeoutMs(definition: ToolDefinition): number | null {
+  if (definition.longRunning || definition.timeoutMs === null) return null
+  if (typeof definition.timeoutMs === 'number' && Number.isFinite(definition.timeoutMs) && definition.timeoutMs > 0) {
+    return Math.trunc(definition.timeoutMs)
+  }
+  return DEFAULT_TOOL_EXECUTE_TIMEOUT_MS
+}
 
 /** R1-B B5：toolsearch 元工具机器名（runtime 原生·延迟模式恒下发恒可调）。 */
 export const TOOLSEARCH_TOOL_NAME = 'toolsearch'

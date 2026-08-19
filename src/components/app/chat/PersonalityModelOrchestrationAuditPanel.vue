@@ -316,7 +316,7 @@
           </div>
         </div>
 
-        <!-- 4 · 提示词树（本地可编辑） -->
+        <!-- 4 · 提示词树（诊断只读；正式编辑入口在文档库“情境提示词”） -->
         <div class="sec">
           <button class="sec-h2" :class="{ open: sectionOpen.prompt }" @click="sectionOpen.prompt = !sectionOpen.prompt">
             <svg class="sec-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
@@ -324,8 +324,9 @@
             <span class="sec-hint">{{ promptTreeHint }}</span>
           </button>
           <div v-if="sectionOpen.prompt" class="sec-body">
-            <!-- 本地工作区直接开放提示词树编辑、增删与保存。 -->
+            <!-- 审计只显示本轮读取标记，不在诊断面板改写正式配置。 -->
             <OrchestratorPromptTreeEditor
+              readonly
               :active-scenario-code="activeRecord?.scenario || ''"
               :used-tool-names="toolUsedNames"
             />

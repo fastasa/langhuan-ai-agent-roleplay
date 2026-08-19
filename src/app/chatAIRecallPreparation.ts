@@ -20,6 +20,7 @@ import {
 } from './recallPublicMilestones'
 import { buildTaskModelAiOptions, type ModelTaskId } from '../utils/modelTaskTiers'
 import { normalizeAiTokenUsage, type AiTokenUsage } from '../utils/aiUsage'
+import { buildEmbeddingCacheScope } from '../utils/modelUsageConfig'
 
 type RecallAIMessage = {
   role: 'system' | 'user' | 'assistant'
@@ -543,7 +544,7 @@ export async function prepareChatAIRecall(
           : undefined,
         embedTexts: callRecallEmbeddings,
         embeddingVectorCache: runtime.recallEmbeddingVectorCache,
-        embeddingCacheScope: runtime.brainAgentConfig?.embeddingPresetId || 'default',
+        embeddingCacheScope: buildEmbeddingCacheScope(runtime.brainAgentConfig),
         currentDate: runtime.currentDate,
         includeCandidateChanges: false,
         includeObservableProfiles: !options.characterOnly,

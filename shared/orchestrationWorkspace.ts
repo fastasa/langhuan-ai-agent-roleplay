@@ -245,6 +245,12 @@ export type SessionOrchestrationState = {
   scenarioSummary: string
   anchorMessageId: string
   sourceArtifactId: string
+  /** 情境检查点依赖版本向量的持久化 JSON；读取适配器会解析为 dependencySnapshot。 */
+  dependencySnapshotJson?: string
+  dependencySnapshot?: {
+    fingerprint?: string
+    values: Readonly<Record<string, string | number | boolean | null | undefined>>
+  }
   version: number
   source: string
   createdAt: string

@@ -58,7 +58,7 @@
             @open-orchestration="$emit('open-orchestration')"
           />
         </div>
-        <div v-else class="tds-dock__empty">本会话还没有提调记录</div>
+        <div v-else class="tds-dock__empty">还没有提调记录</div>
       </div>
       <!-- advisory 交互虽不阻断提调，但展示仍与 blocking/halt 共用底部停靠协议。 -->
       <AgentInteractionDock v-if="scopePending || huiyuConfirmPending">

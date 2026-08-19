@@ -14,7 +14,6 @@ export const sidebar = {
   filterCrowd: '群众角色',
   filterArchived: '已归档',
   createSession: '新建会话',
-  emptySessions: '暂无会话',
   // 主导航栏（聊天/角色/文档库/配置/数据管理/工具）
   navContacts: '聊天',
   navRoles: '角色',

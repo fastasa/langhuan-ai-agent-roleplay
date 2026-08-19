@@ -18,6 +18,7 @@ export const workspaceAgent = {
   modelPickerFollowPreset: 'Use slot preset',
   modelPickerDefaultEffort: 'Default',
   modelPickerDefaultEffortWithValue: 'Default ({effort})',
+  modelPickerSlotEffortWithValue: 'Follow slot ({effort})',
   modelSlot: {
     fast: 'Page',
     balanced: 'Editor',

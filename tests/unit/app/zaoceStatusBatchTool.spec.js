@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createZaoceApplyStatusPanelBatchTool } from '../../../src/app/zaoceStatusBatchTool.ts'
+import {
+  createZaoceApplyStatusPanelBatchTool,
+  ZAOCE_APPLY_STATUS_PANEL_BATCH_TOOL_NAME
+} from '../../../src/app/zaoceStatusBatchTool.ts'
+import {
+  runZaoceBuild,
+  ZAOCE_SUBMIT_TOOL_NAME
+} from '../../../src/app/zaoceSubagent.ts'
 
 function field(key = 'mood', valueType = 'text') {
   return { key, label: key === 'mood' ? '心情' : key, valueType }
@@ -121,6 +128,36 @@ describe('createZaoceApplyStatusPanelBatchTool', () => {
     expect(result.details.receipts).toEqual([
       expect.objectContaining({ kind: 'panel', name: '星依', action: 'create', version: 1, valueProvenance: { mood: 'inferred' } })
     ])
+  })
+
+  it('会话角色缺少正式 participantId 时在事务前拦截，绝不把 characterId 冒充 hostId', async () => {
+    const ctx = context({
+      characterOptions: [{ id: 'character_1', name: '星依' }]
+    })
+    const tool = createZaoceApplyStatusPanelBatchTool(ctx)
+    const result = await tool.execute(call({
+      panels: [{
+        template: '角色模板',
+        name: '星依',
+        description: '记录星依状态',
+        hostType: 'session_character',
+        host: '星依',
+        values: { mood: '平静' },
+        valueProvenance: { mood: 'observed' }
+      }]
+    }), { turnIndex: 0 })
+
+    expect(result).toMatchObject({
+      status: 'error',
+      error: {
+        type: 'TOOL_RUNTIME_ERROR',
+        retryable: true,
+        details: { panelIndex: 0, characterId: 'character_1', host: '星依' }
+      }
+    })
+    expect(String(result.content)).toContain('缺少正式 participantId')
+    expect(String(result.content)).toContain('不能用 characterId 代替')
+    expect(ctx.execute).not.toHaveBeenCalled()
   })
 
   it('多 panel + 新模板：命令严格按模板、panel[0]、panel[1] 排列，同批面板复用预分配模板 id', async () => {
@@ -293,5 +330,74 @@ describe('createZaoceApplyStatusPanelBatchTool', () => {
     expect(attemptedCommands[1]).toEqual(attemptedCommands[0])
     expect(attemptedCommands[0][0].targetRef.panelId).toMatch(/^status_panel_zaoce_[0-9a-f]{16}$/)
     expect(attemptedCommands[0][0].idempotencyKey).toMatch(/^zaoce:/)
+  })
+})
+
+describe('runZaoceBuild · 真实批写回执到结构化交稿', () => {
+  it('panel 写入成功后允许 submitPanels，并以真实 receipt 名称完成任务', async () => {
+    const applyTool = {
+      name: ZAOCE_APPLY_STATUS_PANEL_BATCH_TOOL_NAME,
+      brief: '测试用原子批写',
+      schema: { type: 'object', properties: { panels: { type: 'array' } }, required: ['panels'] },
+      execute: vi.fn(async () => ({
+        content: '批写成功',
+        status: 'success',
+        acted: true,
+        details: {
+          receipts: [{
+            index: 0,
+            kind: 'panel',
+            name: '奥菲利娅·冲突处境状态栏',
+            action: 'create',
+            command: 'saveStatusPanel',
+            targetId: 'panel_ophelia',
+            version: 1,
+            idempotencyKey: 'zaoce:test'
+          }]
+        }
+      }))
+    }
+    let modelTurn = 0
+    const result = await runZaoceBuild('【建栏任务】记录奥菲利娅的长期状态变化', {
+      sessionId: 'session_ophelia',
+      contextBlock: '【当前会话】奥菲利娅是本会话正式参与者。',
+      taskKey: 'ophelia-regression',
+      tools: [applyTool],
+      callModel: vi.fn(async () => {
+        modelTurn += 1
+        if (modelTurn === 1) {
+          return {
+            content: '',
+            toolCalls: [{
+              id: 'apply_1',
+              type: 'function',
+              function: {
+                name: ZAOCE_APPLY_STATUS_PANEL_BATCH_TOOL_NAME,
+                arguments: JSON.stringify({ panels: [{ name: '奥菲利娅·冲突处境状态栏' }] })
+              }
+            }]
+          }
+        }
+        return {
+          content: '',
+          toolCalls: [{
+            id: 'submit_1',
+            type: 'function',
+            function: {
+              name: ZAOCE_SUBMIT_TOOL_NAME,
+              arguments: JSON.stringify({ summary: '已依据当前会话记录创建长期状态栏。' })
+            }
+          }]
+        }
+      })
+    })
+
+    expect(applyTool.execute).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      ok: true,
+      summary: '已依据当前会话记录创建长期状态栏。',
+      panels: ['奥菲利娅·冲突处境状态栏']
+    })
+    expect(result.error).toBeUndefined()
   })
 })

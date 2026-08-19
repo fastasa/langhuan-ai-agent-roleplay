@@ -31,7 +31,13 @@ function listGitCandidates() {
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
     { cwd: projectRoot, encoding: 'utf8' }
   )
-  return output.split('\0').filter(Boolean).map(normalize)
+  return output
+    .split('\0')
+    .filter(Boolean)
+    .map(normalize)
+    // `git ls-files --cached` 也会列出工作区中已删除、等待提交删除的旧文件；
+    // 它们不会进入下一次提交或发行包，不应再按现存候选文件读取。
+    .filter((relativePath) => existsSync(path.join(projectRoot, relativePath)))
 }
 
 function walk(rootPath, basePath = rootPath, result = []) {

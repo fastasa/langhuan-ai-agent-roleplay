@@ -37,7 +37,7 @@ describe('modelTaskTiers imageCaption', () => {
       presetName: 'Vision',
       model: 'vision-model',
       temperature: 0.3,
-      effort: '',
+      effort: 'medium',
       maxTokens: 512,
       thinking: 'disabled'
     })

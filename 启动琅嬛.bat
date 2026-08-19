@@ -47,9 +47,13 @@ for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /B /C:"PORT=" ".env" 2
 node.exe -e "const port = Number(process.argv[1]); process.exit(Number.isInteger(port) && port > 0 && port < 65536 ? 0 : 1)" "%APP_PORT%"
 if errorlevel 1 goto invalid_port
 
+echo [Port] Preparing port %APP_PORT% ...
+node.exe clean-port.js "%APP_PORT%"
+if errorlevel 1 goto port_cleanup_failed
+
 set "NODE_ENV=production"
 if /I not "%~1"=="--no-browser" (
-  start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\open-local-page.ps1" -Port "%APP_PORT%"
+  start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0scripts\open-local-page.ps1" -Port "%APP_PORT%"
 )
 
 echo.
@@ -116,5 +120,11 @@ exit /b 1
 
 :invalid_port
 echo [Error] PORT in .env must be an integer from 1 to 65535.
+pause
+exit /b 1
+
+:port_cleanup_failed
+echo [Error] Could not release port %APP_PORT%.
+echo Close the program using that port or run this launcher as an administrator, then try again.
 pause
 exit /b 1

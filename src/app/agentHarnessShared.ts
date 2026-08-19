@@ -10,6 +10,8 @@ import type { AgentTaskTodoSnapshot } from './agentRuntime/taskTodo'
 import type { AgentSubagentWaitCapability } from './agentRuntime/subagentWait'
 import type { AgentSubagentControlCapability } from './agentRuntime/subagentControl'
 import { runAgentRuntime } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import type { AgentTranscript } from './agentRuntime/types'
 import { ToolRegistry, type ToolDefinition, type ToolExecutionResult } from './agentRuntime/toolRegistry'
 import { HookRegistry } from './agentRuntime/hookRegistry'
@@ -103,6 +105,7 @@ export interface RunWorkspaceAgentRuntimeResult {
  *  原为两处逐字重复副本（scriptwriterAgentHarness.ts/cartographerAgentHarness.ts），只差 agentName/gateId/
  *  nudge 文案里一个动词片段，收编于 2026-07-17（地图与剧本工作区专业Agent计划批B）。 */
 export async function runWorkspaceAgentRuntime(input: RunWorkspaceAgentRuntimeInput): Promise<RunWorkspaceAgentRuntimeResult> {
+  const runtimeVersion = 'agent-runtime-batch1'
   const toolRegistry = new ToolRegistry(input.tools)
   const toolSupply = resolveAgentRuntimeToolSupply(input.profileId, toolRegistry)
   const promptSupplyTrace = resolveAgentPromptSupplyTrace(input)
@@ -114,10 +117,22 @@ export async function runWorkspaceAgentRuntime(input: RunWorkspaceAgentRuntimeIn
       buildNudge: () => `你这一步只说了话，没有真正调用任何工具。如果你还有没做完的事（比如你刚说要去${input.nudgeActionHint}），就现在直接调用对应工具去做；如果确实不需要修改，直接正常给用户最终答复即可（这一步不用再调工具）。`
     })
   ])
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId: input.profileId,
+    runtimeVersion,
+    traceIds: [input.agentName, input.gateId]
+  })
 
   const runtimeResult = await runAgentRuntime({
     agentName: input.agentName,
+    runtimeVersion,
     messages: input.messages,
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: input.profileId,
+      runId: journalPreparation.runId,
+      messages: input.messages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     toolRegistry,
     hookRegistry: continuationGate,
     initialActiveTools: toolSupply.initialActiveTools,

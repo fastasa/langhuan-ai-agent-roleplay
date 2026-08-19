@@ -20,7 +20,10 @@ export function normalizeChatReplyPipelineMode(value: unknown): ChatReplyPipelin
 
 export function normalizeChatSessionReplyPipelineMode(value: unknown): ChatSessionReplyPipelineMode {
   const raw = String(value ?? '').trim().toLowerCase()
-  if (raw === 'fast_reply' || raw === 'fast' || raw === 'quick_reply') return 'fast_reply'
+  // 2026-08-18：快速/人格不再是会话级互斥开关。旧值统一迁到自动链路：
+  // 每轮由续接轻判决定是否直通；角色有已安装人格模型时默认走人格 profile，否则普通召回。
+  if (raw === 'fast_reply' || raw === 'fast' || raw === 'quick_reply') return 'normal_recall'
+  if (raw === 'personality_model' || raw === 'personality' || raw === 'message_projection' || raw === 'projection_model') return 'normal_recall'
   return normalizeChatReplyPipelineMode(value)
 }
 
@@ -28,7 +31,6 @@ export function resolveSessionReplyPipelineMode(session?: Record<string, unknown
   const camelMode = normalizeChatSessionReplyPipelineMode(session?.replyPipelineMode)
   const snakeMode = normalizeChatSessionReplyPipelineMode(session?.reply_pipeline_mode)
   if (camelMode === 'pure_prompt' || snakeMode === 'pure_prompt') return 'pure_prompt'
-  if (camelMode === 'fast_reply' || snakeMode === 'fast_reply') return 'fast_reply'
   return normalizeChatSessionReplyPipelineMode(session?.replyPipelineMode ?? session?.reply_pipeline_mode)
 }
 
@@ -49,8 +51,8 @@ export function hasCharacterPersonalityModel(character?: Record<string, unknown>
 }
 
 /**
- * 配置态模式（不含无模型兜底）：只反映会话/角色配置本身。
- * 仅用于「配置了人格模型但已回退」的可见提示；派发、投影写回等一律吃 resolveReplyPipelineMode 的有效模式。
+ * 配置态 profile：纯净回复优先；角色显式覆盖其次；未覆盖时按人格模型是否安装自动选择。
+ * 是否走稳定续话直通不属于本函数，由 replyOrchestrationRoute 单独判定。
  */
 export function resolveConfiguredReplyPipelineMode(input: {
   session?: Record<string, unknown> | null
@@ -58,14 +60,13 @@ export function resolveConfiguredReplyPipelineMode(input: {
 }): ResolvedReplyPipelineMode {
   const sessionMode = resolveSessionReplyPipelineMode(input.session)
   if (sessionMode === 'pure_prompt') return 'pure_prompt'
-  // fast_reply 是会话轮级编排方式，不是单角色生成 profile。命中角色仍复用 normal_recall
-  // 的正式上下文与正文生成，只由外层提供 directPlan 跳过计划/评审。
-  if (sessionMode === 'fast_reply') return 'normal_recall'
   const override = normalizeCharacterReplyPipelineModeOverride(
     input.character?.replyPipelineModeOverride ?? input.character?.reply_pipeline_mode_override
   )
   if (override !== 'follow_session') return override
-  return sessionMode
+  // 自动 profile：人格模型是否已安装是默认选择的唯一依据。是否跳过复杂统筹由独立的
+  // replyOrchestrationRoute 轻判决定，不再把「快速」混进角色生成 profile。
+  return hasCharacterPersonalityModel(input.character) ? 'personality_model' : 'normal_recall'
 }
 
 export function resolveReplyPipelineMode(input: {
@@ -73,9 +74,7 @@ export function resolveReplyPipelineMode(input: {
   character?: Record<string, unknown> | null
 }): ResolvedReplyPipelineMode {
   const configured = resolveConfiguredReplyPipelineMode(input)
-  // 无模型兜底（用户 2026-07-06 拍板，取代旧「门禁跳过该角色」）：选了人格模型链路但该角色
-  // 没上传 ONNX 模型（含角色解析失败）→ 有效模式回退普通召回。提调编排派发、单聊/群聊工作流、
-  // 重放与投影写回都消费这里的有效模式，回退在此单点收敛。
+  // 显式强制人格模型但模型缺失时仍安全回普通召回；自动选择本身不会进入这个分支。
   if (configured === 'personality_model' && !hasCharacterPersonalityModel(input.character)) return 'normal_recall'
   return configured
 }

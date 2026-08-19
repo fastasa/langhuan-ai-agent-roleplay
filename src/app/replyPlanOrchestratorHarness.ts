@@ -21,11 +21,14 @@ import {
   type ReviewPlanCandidatesToolCall
 } from './personalityPlanOrchestrator'
 import type { AgentRuntimeHistoryMessage, AgentTranscript, ToolCallMessage } from './agentRuntime/types'
+import { DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL } from './directorDirective'
 // 批D·D1（2026-07-12）：导演机族 loop 硬超时单一真值已收口到 groupDirectorPass（此前本文件与
 // groupDirectorHarness/tidiaoCorrectionLoop 各写一份字面量靠注释三处同步，现只改这一处 import）。
 // 批D·D2：命中知识节区块头同样单一真值收口到 groupDirectorPass（与①③同款〔〕风格，见该常量注释）。
 import { DIRECTOR_LOOP_TIMEOUT_MS, DIRECTOR_KNOWLEDGE_MATCHED_SECTION_TITLE } from './groupDirectorPass'
 import { runAgentRuntime, type AgentRuntimeProgressEvent } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 // R3-2：把 runtime 上抛的保真事件 append 进当前活动 append log（pipeline 已按 runId 起 log；无活动 log 时 append 自动空操作）。
 import { feedAppendLogFromFidelityEvent } from './agentState/appendLogFeed'
 // U5：导演模式（directorMode=单聊续跑当导演）补提调知识库 + 检索兜底，与轮级提调 runGroupDirectorHarness 口径一致。
@@ -285,10 +288,11 @@ export function buildUserDirectorDirectiveProtocol(
   const lines = [
     `【${who}私密指令】下面是${who}本轮只对你（提调）下达的私密安排，用双层方括号包裹、只有你能看到：`,
     list,
+    DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL,
     // 关键：先点明它不改变流程，避免模型「回应完私密指令就空手收尾、连情境都没读」导致编排为空。
     `重要：这条私密指令不改变你这一轮的正常工作流程——你仍要照常先读情境、再调用 generatePlanBatch 生成回复计划，一路走到产出正文，绝不能因为这条指令就跳过计划生成或提前结束这一轮。`,
     '在正常流程的基础上，额外遵守下面两条：',
-    `① 让本轮的情境判断、旁白安排和各角色回复方向，朝${who}这条私密安排指引的方向走；它的优先级高于你对剧情的常规判断。`,
+    `① 必须让本轮的情境判断、旁白安排、各角色回复方向和最终正文完整落实${who}的私密安排，不能只在决策 thought 里口头确认。`,
     `② 绝不能把这条指令的文字、含义或「${who}下过私密指令」这件事，泄露到旁白正文、角色台词、消息正文等任何会展示给${who}或角色的剧情内容里；角色并不知情，不要让角色像听到了指令一样反应。`
   ]
   if (directorMode) {
@@ -651,11 +655,25 @@ async function runReplyPlanAgentRuntime(
     : ['readScenarioSkill', 'updateCurtainScene', 'getToolManual', ...auxToolNames]
   const stageRecommendedToolSet = new Set(stageRecommendedTools)
   const recommendedTools = toolSupply.recommendedTools.filter((toolName) => stageRecommendedToolSet.has(toolName))
+  const runtimeVersion = 'reply-plan-agent-runtime-v1'
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId: 'role_reply.plan-orchestration',
+    runtimeVersion,
+    // characterName 让同一导演轮内各 speaker 可区分；随机尾码保证重试/并发也不相撞。
+    traceIds: [directorMode ? 'director' : 'speaker', input.characterName]
+  })
 
   const runtimeResult = await runAgentRuntime({
     agentName: 'ReplyPlanAgent',
-    runtimeVersion: 'reply-plan-agent-runtime-v1',
+    runtimeVersion,
     messages: prompt.messages.map((message) => ({ ...message })),
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: 'role_reply.plan-orchestration',
+      runId: journalPreparation.runId,
+      goal: input.currentUserInput,
+      messages: prompt.messages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     // 接缝重构 Step1：演员 loop 自建 toolRegistry（按接缝在位调工厂·见上）+ deferred 模式。可见/可调 = 阶段机 activeTools
     // （每步收窄流水线·runtime 自动黏回 toolsearch + 越权激活工具不被抹掉）+ toolsearch 越权。recommendedTools = 演员常用集；
     // registry 成员＝当轮真有 context 的工具（取代 B3 隐藏·真越权目录等价·R2-0 演员纲领约束）。

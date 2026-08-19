@@ -158,7 +158,7 @@ describe('XingyiDesktopPet · 超级 Agent hover 入口', () => {
     expect(source).toContain('height: 38px')
   })
 
-  it('真实加载单帧 SVG manifest 后在 pointerenter / pointerleave 保持本地图像', async () => {
+  it('真实加载 spritesheet manifest 后在 pointerenter / pointerleave 切到抬手与放手首帧', async () => {
     const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/xingyi-pet/runtime/manifest.json'), 'utf8'))
     fetch.mockResolvedValue({ ok: true, json: async () => manifest })
     matchMedia.mockReturnValue({ matches: false })
@@ -183,10 +183,10 @@ describe('XingyiDesktopPet · 超级 Agent hover 入口', () => {
 
     const pet = wrapper.get('.xingyi-desktop-pet')
     await pet.trigger('pointerenter')
-    expect(wrapper.get('.xingyi-desktop-pet__sprite').attributes('style')).toContain('background-position: 0px 0px')
+    expect(wrapper.get('.xingyi-desktop-pet__sprite').attributes('style')).toContain('background-position: 0px -257.92px')
 
     await pet.trigger('pointerleave')
-    expect(wrapper.get('.xingyi-desktop-pet__sprite').attributes('style')).toContain('background-position: 0px 0px')
+    expect(wrapper.get('.xingyi-desktop-pet__sprite').attributes('style')).toContain('background-position: 0px -515.84px')
     wrapper.unmount()
   })
 })

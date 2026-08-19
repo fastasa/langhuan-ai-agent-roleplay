@@ -26,6 +26,8 @@
 import { ToolRegistry, type ToolDefinition } from './agentRuntime/toolRegistry'
 import { HookRegistry, type HookDefinition } from './agentRuntime/hookRegistry'
 import { runAgentRuntime, type AgentRuntimeProgressEvent } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import type { AgentTranscript, ToolResultMessage } from './agentRuntime/types'
 import { createEmptyTurnContinuationGate } from './agentRuntime/continuationGate'
 import {
@@ -290,6 +292,11 @@ export async function runSubagentLoop(spec: SubagentLoopSpec): Promise<SubagentL
     const registry = new ToolRegistry([...spec.tools, spec.submitTool])
     const toolSupply = resolveAgentRuntimeToolSupply(spec.profileId, registry)
     const promptSupplyTrace = resolveAgentPromptSupplyTrace(spec)
+    const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+      profileId: spec.profileId,
+      runtimeVersion: spec.runtimeVersion,
+      traceIds: [spec.sessionId, spec.subagentId]
+    })
     // 主跑交稿工具最近一次 error 回执捕捉（批K）：宽限轮 buildNudge 的 failureHint 来源——
     // validateArgs 报错走普通 executor 错误结果（非 blocked），会经 afterToolResult hook，这里能看到。
     let lastSubmitFailureHint = ''
@@ -388,6 +395,13 @@ export async function runSubagentLoop(spec: SubagentLoopSpec): Promise<SubagentL
       agentName: spec.agentName,
       runtimeVersion: spec.runtimeVersion,
       messages: spec.messages,
+      contextPressure: buildAgentRuntimeContextPolicy({
+        scope: spec.profileId,
+        runId: journalPreparation.runId,
+        goal: spec.loggedInput,
+        messages: spec.messages
+      }),
+      ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
       toolRegistry: registry,
       initialActiveTools: toolSupply.initialActiveTools,
       recommendedTools: toolSupply.recommendedTools,
@@ -433,10 +447,25 @@ export async function runSubagentLoop(spec: SubagentLoopSpec): Promise<SubagentL
           // trackedCallModel 共享同一份状态，切换后两者自动跟着用新前缀、不再各建各的独立计数。
           timelineTurnLabelPrefix = '宽限轮·'
           timelineTurnIndex = -1
+          const graceJournalPreparation = await prepareAgentRuntimeJournalForHarness({
+            profileId: spec.profileId,
+            runtimeVersion: spec.runtimeVersion,
+            runId: `${journalPreparation.runId}:grace`
+          })
           const graceResult = await runAgentRuntime({
             agentName: spec.agentName,
             runtimeVersion: spec.runtimeVersion,
             messages: graceMessages,
+            // 宽限轮会重送主跑表层（其中较早的 resultClampChars:null 结果可能仍是全文）：继续测压并剪枝新结果，
+            // 但固定 2 轮/2 次工具的收尾不再重复建立语义 checkpoint。
+            contextPressure: buildAgentRuntimeContextPolicy({
+              scope: spec.profileId,
+              runId: graceJournalPreparation.runId,
+              goal: spec.loggedInput,
+              messages: graceMessages,
+              override: { semanticCompaction: { enabled: false } }
+            }),
+            ...(graceJournalPreparation.journal ? { journal: graceJournalPreparation.journal } : {}),
             toolRegistry: new ToolRegistry([spec.submitTool]),
             initialActiveTools: [spec.submitGrace.submitToolName],
             budget: SUBMIT_GRACE_BUDGET,

@@ -848,7 +848,7 @@ describe('useAppShellPanelBuilders chat bridge', () => {
     expect(ctx.chatStore.setTyping).not.toHaveBeenCalled()
     expect(ctx.chatStore.switchSession).toHaveBeenCalledWith('session_a')
     await flushAsyncTurns(3)
-    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_a', 88)
+    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_a', 88, { promptLogMode: 'background' })
     expect(runChatProjectionWritebackBySessionId).toHaveBeenCalledWith('session_a', {
       characterId: 'char_a',
       runKind: 'auto'
@@ -927,7 +927,7 @@ describe('useAppShellPanelBuilders chat bridge', () => {
 
     expect(ctx.chatStore.switchSession).toHaveBeenCalledWith('session_a')
     await flushAsyncTurns(3)
-    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_a', 88)
+    expect(runChatMessageProjectionBySessionId).toHaveBeenCalledWith('session_a', 88, { promptLogMode: 'background' })
     expect(runChatProjectionWritebackBySessionId).toHaveBeenCalledWith('session_a', {
       characterId: 'char_a',
       runKind: 'auto'

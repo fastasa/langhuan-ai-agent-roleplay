@@ -1,4 +1,6 @@
 import type { ChatReplyPipelineMode } from './chatReplyPipelineMode'
+import type { ReplyExecutionProfile } from './replyExecutionProfile'
+import type { ReplyOrchestrationRouteDecision } from './replyOrchestrationRoute'
 
 export type ChatTurnReplyMode = ChatReplyPipelineMode | 'fast_reply' | 'session_temporary_entity_narration'
 
@@ -78,6 +80,10 @@ export interface TurnContext {
   taskRunId?: string
   generationAttemptId?: string
   replyMode: ChatTurnReplyMode
+  /** 正交执行画像：统筹深度、回复后端、规划、上下文与轮后策略；只用于执行/审计。 */
+  replyExecutionProfile?: ReplyExecutionProfile
+  /** 自动路由原始判定；与执行画像一起写入生成产物，供事后核对理由和依赖比较。 */
+  replyOrchestrationDecision?: ReplyOrchestrationRouteDecision
   roundId?: string
   abortSignal?: AbortSignal
 }

@@ -45,7 +45,7 @@ describe('XingyiStarIcon · 像素状态星最小图形', () => {
     expect(desktopPetSource).toContain("prefersReducedMotion()")
     expect(desktopPetSource).toContain('XINGYI_PET_MANIFEST_URL')
     expect(desktopPetSource).toContain(':style="spriteStyle"')
-    expect(desktopPetSource).toContain("const PET_FALLBACK_SRC = '/xingyi-pet/runtime/mascot.svg'")
+    expect(desktopPetSource).toContain("const PET_FALLBACK_SRC = '/xingyi-pet/xingyi-pet-idle-v2.png'")
     expect(desktopPetSource).toContain('dockOpen?: boolean')
     expect(desktopPetSource).toContain("(e: 'toggle-dock'): void")
     expect(desktopPetSource).toContain("const launcherAriaLabel = computed(() => props.dockOpen")

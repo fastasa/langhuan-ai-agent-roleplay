@@ -260,7 +260,7 @@ describe('dispatchTidiaoCorrection 工具', () => {
     expect(secondPayload.versionList).toHaveLength(2)
     expect(secondPayload.versionList[1].content).toBe('第二次改')
     expect(patched).toHaveLength(2)
-    expect(repoMocks.runChatMessageProjectionBySessionId).toHaveBeenCalledWith(SESSION_ID, 12)
+    expect(repoMocks.runChatMessageProjectionBySessionId).toHaveBeenCalledWith(SESSION_ID, 12, { promptLogMode: 'background' })
     expect(result.status).not.toBe('error')
     expect(result.content).toContain('已写回')
     expect(result.content).toContain('重跑投影')

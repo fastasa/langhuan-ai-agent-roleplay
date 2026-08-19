@@ -64,7 +64,7 @@ export function planFastReplySpeakers(input: {
     .map((candidate, index) => ({ ...candidate, order: index }))
 }
 
-/** 给快速回复提调规划器的边界提示，不是可直接交给正文模型的最终回复计划。 */
+/** 稳定续话直通正文时的最小边界：不重判情境，不代替角色本身的自由表达。 */
 export function buildFastReplyPlanningHint(input: {
   speakerName: string
   userText: string
@@ -77,4 +77,42 @@ export function buildFastReplyPlanningHint(input: {
     prior.length ? `本轮已有这些角色先发言：${prior.join('、')}。自然承接他们已经落库的内容，不重复抢答。` : '',
     '把当前应有的动作、态度或言语完整写出来；避免敷衍短句，也不要无事扩写。'
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * 人格模型在稳定续话里不再触发完整计划树；它只在三条无额外模型调用的直通策略间评分。
+ * 首条保留原边界作可靠降级，后两条只改变表达焦点，不重判事实或推动情境。
+ */
+export function buildFastReplyPersonalityPlanCandidates(baseHint: string): Array<{
+  id: string
+  strategy: string
+  strategyLabel: string
+  intensity: string
+  content: string
+}> {
+  const base = String(baseHint || '').trim()
+  if (!base) return []
+  return [
+    {
+      id: 'reuse_direct_natural',
+      strategy: 'natural_continuation',
+      strategyLabel: '自然承接',
+      intensity: 'balanced',
+      content: base
+    },
+    {
+      id: 'reuse_direct_intent',
+      strategy: 'intent_focus',
+      strategyLabel: '回应意图',
+      intensity: 'balanced',
+      content: `${base}\n优先回应对方最后一句里最具体的意图，不重复解释已经确认的背景。`
+    },
+    {
+      id: 'reuse_direct_character',
+      strategy: 'character_focus',
+      strategyLabel: '人格表达',
+      intensity: 'balanced',
+      content: `${base}\n优先体现角色一贯的情绪反应与说话方式，但不要为表现个性新增事实或支线。`
+    }
+  ]
 }

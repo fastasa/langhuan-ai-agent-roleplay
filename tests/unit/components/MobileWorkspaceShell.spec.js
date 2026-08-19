@@ -724,13 +724,19 @@ describe('MobileWorkspaceShell', () => {
     await waitForDocLibrary()
 
     expect(docLibraryMock.fetchDocLibraryState).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('世界树')
+    const tabLabels = wrapper.findAll('.mobile-doc-tab').map((tab) => tab.text())
+    expect(tabLabels).toEqual(['世界树', '关系', '角色提示词', '情境提示词'])
     expect(wrapper.text()).toContain('亚什基诺')
     expect(wrapper.text()).toContain('组织')
 
     await wrapper.find('.mobile-doc-search input').setValue('夜巡')
     expect(wrapper.text()).toContain('夜巡者')
     expect(wrapper.text()).not.toContain('靠海贸易城邦')
+
+    await wrapper.findAll('.mobile-doc-tab').find((tab) => tab.text() === '情境提示词').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.scenario-prompt-library').exists()).toBe(true)
+    expect(wrapper.find('.mobile-doc-search').exists()).toBe(false)
   })
 
   it('opens a doc unit reader and read-only relation projection', async () => {

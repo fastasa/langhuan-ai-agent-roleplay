@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractDirectorDirectives, maybeAutoCloseDirectiveBracket } from '../../../src/app/directorDirective'
+import {
+  DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL,
+  extractDirectorDirectives,
+  maybeAutoCloseDirectiveBracket
+} from '../../../src/app/directorDirective'
+
+describe('私密指令统一优先级协议', () => {
+  it('明确无条件遵守、优先级高于一切，并区分内容目标与执行协议', () => {
+    expect(DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL).toContain('必须无条件、完整、直接遵守')
+    expect(DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL).toContain('优先级高于一切')
+    expect(DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL).toContain('角色性格、情境 skill')
+    expect(DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL).toContain('不得降级、改写、折中、拖延')
+    expect(DIRECTOR_DIRECTIVE_HIGHEST_PRIORITY_PROTOCOL).toContain('最高优先级决定“做什么”')
+  })
+})
 
 describe('extractDirectorDirectives', () => {
   it('普通文本零改动、无指令', () => {

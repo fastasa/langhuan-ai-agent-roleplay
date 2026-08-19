@@ -26,6 +26,12 @@ import {
   projectRimWorldPawnSnapshot
 } from './agentContextProjectors.js'
 import type { RimWorldPawnSnapshotV1 } from '../../../shared/rimworldBridge.js'
+import {
+  AGENT_CONTEXT_CACHE_SCHEMA_VERSION,
+  createVersionedAgentContextCache,
+  digestAgentContextCacheValue,
+  type VersionedAgentContextCache
+} from './versionedAgentContextCache.js'
 
 type AnyRecord = Record<string, any>
 type ServiceResult = { ok: true; data: AgentContextBundle } | { ok: false; status: number; error: string; details?: unknown }
@@ -64,6 +70,7 @@ export type AgentContextProjectionSource = {
 export type AgentContextProjectionLoaders = {
   loadSource: (input: ResolveAgentContextInput, perspective: AgentContextPerspective) => Promise<AgentContextProjectionSource> | AgentContextProjectionSource
   now?: () => string
+  cache?: VersionedAgentContextCache
 }
 
 function text(value: unknown): string {
@@ -90,7 +97,10 @@ function estimateProjectionSize(result: AgentContextProjectionResult): number {
 }
 
 export function createAgentContextProjectionService(loaders: AgentContextProjectionLoaders) {
+  const cache = loaders.cache || createVersionedAgentContextCache()
   return {
+    clearCache() { cache.clear() },
+    getCacheStats() { return cache.stats() },
     async resolve(rawInput: ResolveAgentContextInput): Promise<ServiceResult> {
       if (!isAgentKind(rawInput.agentKind)) return { ok: false, status: 400, error: `未知 Agent 上下文配方：${String(rawInput.agentKind || '')}` }
       const sessionId = text(rawInput.sessionId)
@@ -105,7 +115,6 @@ export function createAgentContextProjectionService(loaders: AgentContextProject
       } catch (error) {
         return { ok: false, status: 400, error: (error as Error).message }
       }
-      const generatedAt = loaders.now?.() || new Date().toISOString()
       let source: AgentContextProjectionSource
       try {
         source = await loaders.loadSource({ ...rawInput, sessionId, userId, workspaceId }, perspective)
@@ -128,6 +137,25 @@ export function createAgentContextProjectionService(loaders: AgentContextProject
       if (perspective.kind === 'character' && !ownParticipant) {
         return { ok: false, status: 403, error: '角色视角必须指向当前会话正式角色参与者' }
       }
+
+      const cacheKey = digestAgentContextCacheValue({
+        schemaVersion: AGENT_CONTEXT_CACHE_SCHEMA_VERSION,
+        recipeVersion: recipe.version,
+        agentKind: recipe.agentKind,
+        scope,
+        perspective,
+        input: {
+          characterId: text(rawInput.characterId),
+          anchorMessageId: Number(rawInput.anchorMessageId || 0),
+          userText: text(rawInput.userText),
+          roundCandidateIds: (rawInput.roundCandidateIds || []).map(text),
+          forcedCharacterIds: (rawInput.forcedCharacterIds || []).map(text)
+        },
+        source
+      })
+      const cached = cache.get(cacheKey)
+      if (cached) return { ok: true, data: cached }
+      const generatedAt = loaders.now?.() || new Date().toISOString()
 
       const presenceByParticipant = new Map(source.presences.map((item) => [text(item.participantId ?? item.participant_id), text(item.presenceState ?? item.presence_state)]))
       const visibleCharacterIds = new Set(source.participants.filter((item) => {
@@ -251,9 +279,13 @@ export function createAgentContextProjectionService(loaders: AgentContextProject
         }
       }
 
+      const data: AgentContextBundle = {
+        agentKind: recipe.agentKind, recipeVersion: recipe.version, scope, perspective, generatedAt, projections, omitted
+      }
+      cache.set(cacheKey, data)
       return {
         ok: true,
-        data: { agentKind: recipe.agentKind, recipeVersion: recipe.version, scope, perspective, generatedAt, projections, omitted }
+        data
       }
     }
   }

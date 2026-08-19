@@ -536,11 +536,7 @@
           <template #empty>
             <section class="role-main__empty role-main__empty--brain-open">
               <div class="role-main__empty-inner">
-                <svg class="role-main__empty-book role-main__empty-branch" viewBox="0 0 120 96" aria-hidden="true">
-                  <path d="M60 82V34M60 46 39 27M60 58l24-23M39 27l-18-8M39 27l-4-17M84 35l17-8M84 35l4-18" />
-                  <circle cx="21" cy="19" r="7" /><circle cx="35" cy="10" r="7" /><circle cx="101" cy="27" r="7" /><circle cx="88" cy="17" r="7" />
-                  <path d="M32 84h56" />
-                </svg>
+                <img class="role-main__empty-book role-main__empty-branch" :src="roleBrainEmptyBranchUrl" alt="" aria-hidden="true">
                 <div class="role-main__empty-copy">
                   <div class="role-main__empty-title">{{ selectedRoleEntity.name || '角色' }}</div>
                   <div class="role-main__empty-text">在左侧角色大脑中选择一个簇枝桠</div>
@@ -612,7 +608,7 @@
                   </div>
                 </div>
                 <div class="role-main__empty-guide role-main__empty-guide--brain-open" aria-hidden="true">
-                  <svg class="role-main__empty-arrow" viewBox="0 0 120 42" aria-hidden="true"><path d="M112 8C81 8 60 20 27 31" /><path d="m35 20-10 12 16 3" /></svg>
+                  <img class="role-main__empty-arrow" :src="roleEmptyArrowUrl" alt="">
                   <span>从左侧角色大脑开始</span>
                 </div>
               </div>
@@ -764,11 +760,7 @@
           @delete-all-duplicate-relation-hints="deleteAllRoleDuplicateRelationHints"
         />
         <section v-if="!selectedRoleEntity || !roleBrainDrawerOpen" class="role-main__empty role-main__empty--no-role">
-          <svg class="role-main__empty-book" viewBox="0 0 160 112" aria-hidden="true">
-            <path d="M80 93c-17-13-36-18-60-15V23c24-3 43 2 60 15v55Z" />
-            <path d="M80 93c17-13 36-18 60-15V23c-24-3-43 2-60 15v55Z" />
-            <path d="M34 43c12 0 22 3 32 9M34 58c12 0 22 3 32 9M126 43c-12 0-22 3-32 9M126 58c-12 0-22 3-32 9" />
-          </svg>
+          <img class="role-main__empty-book" :src="roleEmptyBookUrl" alt="" aria-hidden="true">
           <div class="role-main__empty-copy">
             <div class="role-main__empty-title">请选择角色</div>
             <div class="role-main__empty-text">选择角色后进入「角色大脑」与编辑工作台</div>
@@ -797,7 +789,7 @@
             </div>
           </div>
           <div class="role-main__empty-guide" aria-hidden="true">
-            <svg class="role-main__empty-arrow" viewBox="0 0 120 42" aria-hidden="true"><path d="M112 8C81 8 60 20 27 31" /><path d="m35 20-10 12 16 3" /></svg>
+            <img class="role-main__empty-arrow" :src="roleEmptyArrowUrl" alt="">
             <span>从左侧选择一个角色，开启探索之旅吧～</span>
           </div>
         </section>
@@ -897,6 +889,9 @@ import AppApiConfigSection from '../sections/AppApiConfigSection.vue'
 // 世界管理页（世界一等公民 P1 批2）：顶层工作区视图 'worlds'，与 config/data 同级——不再是自治弹窗
 import WorldManagerSection from '../world/WorldManagerSection.vue'
 import { API } from '../../../config/api'
+import roleEmptyArrowUrl from '../../../assets/illustrations/role-empty-arrow.png'
+import roleEmptyBookUrl from '../../../assets/illustrations/role-empty-book.png'
+import roleBrainEmptyBranchUrl from '../../../assets/illustrations/role-brain-empty-branch.png'
 import { prefetchDocLibraryState } from '../../../repositories/docBrainRepository'
 import type { DocLibraryModuleTab } from '../../../app/docLibraryModules'
 import { renderMarkdownToHtml } from '../../../utils/markdown'
@@ -1791,7 +1786,7 @@ const {
   startResize: startChatSidebarResize
 } = useResizablePanel({
   storageKey: 'langhuan_chat_sidebar_width',
-  defaultWidth: 280,
+  defaultWidth: 334,
   minWidth: 160,
   maxWidth: 630,
   enabled: computed(() => isDesktopViewport.value && props.viewModel.sidebarOpen)
@@ -5501,12 +5496,7 @@ onBeforeUnmount(() => {
   max-width: 58vw;
   height: auto;
   margin: 0 auto 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  color: rgba(92, 138, 92, 0.68);
+  object-fit: contain;
   opacity: 0.92;
   pointer-events: none;
   user-select: none;
@@ -5627,12 +5617,7 @@ onBeforeUnmount(() => {
   display: block;
   width: clamp(76px, 9vw, 116px);
   height: auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  color: rgba(92, 138, 92, 0.72);
+  object-fit: contain;
   opacity: 0.72;
   pointer-events: none;
   user-select: none;

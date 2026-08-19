@@ -106,7 +106,7 @@ export const mobile = {
     apiSummary: '{mode} · プリセット {count} 件',
     currentVersion: '現在'
   },
-  // モバイルドキュメントライブラリ作業領域（ライブラリタイトルは sidebar.navDocs、プロンプトタブは docLibrary.topbar.promptTitle、関係ビューは docLibrary.relation.viewLabel、編集は common.edit、開くは chatList.open を再利用）
+  // モバイルドキュメントライブラリ作業領域（ライブラリタイトルは sidebar.navDocs、2 種類のプロンプトタブは docLibrary.topbar のタイトル、関係ビューは docLibrary.relation.viewLabel、編集は common.edit、開くは chatList.open を再利用）
   docWs: {
     aria: 'モバイルドキュメントライブラリ',
     tabsAria: 'ドキュメントライブラリの区分',
@@ -191,7 +191,10 @@ export const mobile = {
     loadModels: 'モデルを読み込む',
     params: 'パラメータ',
     catalogEmbedding: 'カタログ（埋め込み）',
-    catalogHint: 'ベクトルリコール／取得の埋め込み：Langhuan デフォルト埋め込みプリセット（サーバー側で一元管理）',
+    catalogHint: 'ベクトルリコール／取得に使用。embeddings 対応のローカル API プリセットを選択してください',
+    embeddingPresetPlaceholder: '埋め込みプリセットを選択',
+    embeddingModelPlaceholder: '埋め込みモデル名を入力',
+    embeddingDimensions: 'ベクトル次元',
     recallWriteStrategy: 'リコールと書き込み戦略',
     recallWriteHint: '戦略と審査パラメータのみ設定',
     intentSnapshot: '意図スナップショット',
@@ -224,6 +227,10 @@ export const mobile = {
     reasoningSummaryUnavailable: '思考要約（AGY は未対応）',
     reasoningSummaryOff: '返さない',
     reasoningSummaryOn: '要約を返す',
+    reasoningEffort: '推論の努力度',
+    followModelDefault: 'モデル既定値に従う',
+    followModelDefaultWithValue: 'モデル既定値に従う（{effort}）',
+    savedEffort: '保存済みの段階',
     fastService: '高速サービス',
     fastServiceHint: '現在の Codex モデルが提供する高速サービス枠を使用します',
     subtitleAgent: 'モデル用途、リコールと書き込み',

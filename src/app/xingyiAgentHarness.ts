@@ -22,6 +22,8 @@ import type { AgentRuntimeMessage, AgentRuntimeProgressEvent } from './agentRunt
 import type { AgentTaskTodoSnapshot } from './agentRuntime/taskTodo'
 import type { AgentSubagentControlCapability } from './agentRuntime/subagentControl'
 import { runAgentRuntime } from './agentRuntime/runtime'
+import { buildAgentRuntimeContextPolicy } from './agentRuntimeContextPolicy'
+import { prepareAgentRuntimeJournalForHarness } from './agentRuntimeJournalPolicy'
 import { extractAgentRuntimeReply, isAgentTurnUnfinished } from './agentHarnessShared'
 import {
   formatAttachmentNote,
@@ -513,9 +515,23 @@ export async function runXingyiAgent(input: RunXingyiAgentInput): Promise<RunXin
     })
   ])
 
+  const runtimeVersion = 'agent-runtime-batch1'
+  const journalPreparation = await prepareAgentRuntimeJournalForHarness({
+    profileId: 'xingyi.global',
+    runtimeVersion,
+    traceIds: [XINGYI_AGENT_NAME]
+  })
   const runtimeResult = await runAgentRuntime({
     agentName: XINGYI_AGENT_NAME,
+    runtimeVersion,
     messages,
+    contextPressure: buildAgentRuntimeContextPolicy({
+      scope: 'xingyi.global',
+      runId: journalPreparation.runId,
+      goal: input.userText,
+      messages
+    }),
+    ...(journalPreparation.journal ? { journal: journalPreparation.journal } : {}),
     toolRegistry,
     hookRegistry: continuationGate,
     initialActiveTools: xingyiToolSupply.initialActiveTools,

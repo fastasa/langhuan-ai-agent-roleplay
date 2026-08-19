@@ -16,12 +16,13 @@ import { buildModelUsageAiOptions } from './modelUsageConfig'
  *   书童 fast——人格/普通召回计划批次、人格内核解析、里程碑改写等格式化小任务
  *   编目 embedding——嵌入向量（embeddingPresetId 独立链路·不经文本槽，不在本表）
  *
- * 温度/maxTokens/thinking 由调用点覆写；serviceTier 随槽位统一继承；effort 只允许由具体 Agent 对话覆盖，不再存进全局槽配置；
+ * 温度/maxTokens/thinking 由调用点覆写；serviceTier 与 effort 随槽位统一继承；具体 Agent 对话可显式覆盖 effort；
  * 原角色消息 temp1/4096、旁白 0.8/800、高量 8192 等槽默认已落各调用点覆写，行为不变。
  * loop 型 subagent（采风/造册/编剧）一律在本表取档（subagentSpec 单次调用注册表已于 2026-07-10 退役）。
  */
 export type ModelTaskId =
   | 'directorLoop'          // 统筹/纠偏/精修决策 loop（buildDeferredLoopModelCall + 外部纠偏 runner）
+  | 'replyRouteJudge'       // 上一轮情境续接轻判（不生成回复、不运行工具）
   | 'focusedActionJudge'    // 动作输入书童前置判断（隐私/形式/立即任务）
   | 'replyPlanMain'         // 回复计划编排 loop 主判
   | 'replyPlanLite'         // 回复计划编排 loop 轻判
@@ -50,6 +51,7 @@ export type ModelTaskId =
 
 export const MODEL_TASK_TIERS: Record<ModelTaskId, ModelUsageSlotId> = {
   directorLoop: 'smart',
+  replyRouteJudge: 'fast',
   focusedActionJudge: 'fast',
   replyPlanMain: 'balanced',
   replyPlanLite: 'balanced',

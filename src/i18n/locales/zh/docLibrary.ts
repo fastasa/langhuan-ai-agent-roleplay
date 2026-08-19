@@ -8,7 +8,7 @@ export const docLibrary = {
     hoursAgo: '{count} 小时前更新',
     daysAgo: '{count} 天前更新'
   },
-  // 文档库模块页签（世界树/关系；提示词页签复用 topbar.promptTitle）
+  // 文档库模块页签（世界树/关系；两类提示词页签复用 topbar 标题）
   moduleTab: {
     worldTree: '世界树',
     relation: '关系'
@@ -90,9 +90,10 @@ export const docLibrary = {
     browse: '浏览',
     editSuffix: '编辑'
   },
-  // 顶栏动作标签（页面 / 提示词两态）
+  // 顶栏动作标签（页面 / 角色提示词 / 情境提示词）
   topbar: {
-    promptTitle: '提示词',
+    rolePromptTitle: '角色提示词',
+    scenarioPromptTitle: '情境提示词',
     pageSearch: '页面搜索',
     deletePage: '删除页面',
     deletePrompt: '删除提示词',

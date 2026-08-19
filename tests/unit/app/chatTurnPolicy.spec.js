@@ -17,6 +17,12 @@ describe('chatTurnPolicy', () => {
     ])
   })
 
+  it('keeps fast reply as an automatic per-turn policy after retiring the session switch', () => {
+    expect(normalizeChatTurnReplyMode('fast_reply')).toBe('fast_reply')
+    expect(isReplyFeatureEnabled('fast_reply', 'message_projection')).toBe(true)
+    expect(isReplyFeatureEnabled('fast_reply', 'post_round_orchestration')).toBe(false)
+  })
+
   it('keeps normal recall using recall plus projection-first context and writeback', () => {
     expect(isReplyFeatureEnabled('normal_recall', 'role_brain_recall')).toBe(true)
     expect(isReplyFeatureEnabled('normal_recall', 'message_projection')).toBe(true)

@@ -60,8 +60,9 @@ export function buildAgentConversationModelAiOptions(
   selection: AgentConversationModelSelection,
   overrides: Partial<Pick<ModelUsageConfig, 'maxTokens' | 'temperature' | 'thinking'>> = {}
 ) {
+  const effort = normalizeModelReasoningEffort(selection.effort)
   return buildModelUsageAiOptions(agentConfig, selection.slotId, {
     ...overrides,
-    effort: selection.effort
+    ...(effort ? { effort } : {})
   })
 }

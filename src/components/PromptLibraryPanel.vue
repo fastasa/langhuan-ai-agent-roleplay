@@ -4,7 +4,7 @@
       <div class="prompt-library__sidebar-header">
         <div>
           <div class="prompt-library__eyebrow">Prompt Library</div>
-          <div class="prompt-library__title">提示词</div>
+          <div class="prompt-library__title">角色提示词</div>
         </div>
         <div class="prompt-library__sidebar-actions">
           <button
@@ -164,7 +164,14 @@
 
         <label class="prompt-library__field prompt-library__field--editor">
           <span class="prompt-library__label">正文</span>
-          <textarea v-model="draft.content" class="prompt-library__textarea" spellcheck="false" placeholder="请输入提示词正文" :readonly="isScenarioMountedPlaceholderRecord(activeRecord)"></textarea>
+          <textarea
+            ref="contentTextareaRef"
+            class="prompt-library__textarea"
+            spellcheck="false"
+            placeholder="请输入提示词正文"
+            :readonly="isScenarioMountedPlaceholderRecord(activeRecord)"
+            @input="handleContentInput"
+          ></textarea>
         </label>
         <div v-if="isScenarioMountedPlaceholderRecord(activeRecord)" class="prompt-library__readonly-note">
           这是所有情境 skill 挂载提示词共用的占位；这里只能拖动改变拼装位置，正文在所属情境下编辑。
@@ -247,7 +254,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppConfirmDialog from './common/AppConfirmDialog.vue'
 import AppFormDialog from './common/AppFormDialog.vue'
 import SidebarFloatingMenu from './common/SidebarFloatingMenu.vue'
@@ -358,6 +365,8 @@ const draggedPromptId = ref('')
 const dropTargetId = ref('')
 const dropPosition = ref<'before' | 'after'>('after')
 const importInputRef = ref<HTMLInputElement | null>(null)
+const contentTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const contentDirty = ref(false)
 const varsDialogOpen = ref(false)
 const noticeText = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
@@ -545,38 +554,20 @@ const sidebarRows = computed<PromptSidebarRow[]>(() => (
 
 const activeRecord = computed(() => promptRecords.value.find((item) => item.id === selectedId.value) || null)
 
-const activeRecordSnapshot = computed(() => {
-  if (!activeRecord.value) return ''
-  return JSON.stringify({
-    title: activeRecord.value.title,
-    content: activeRecord.value.content,
-    group: activeRecord.value.group,
-    enabledText: activeRecord.value.enabled ? 'enabled' : 'disabled',
-    isRequiredText: activeRecord.value.isRequired ? 'required' : 'optional',
-    usageMode: activeRecord.value.usageMode,
-    scope: activeRecord.value.scope,
-    scene: activeRecord.value.scene,
-    priority: activeRecord.value.priority,
-    summary: activeRecord.value.summary,
-    updatedAt: activeRecord.value.updatedAt
-  })
+const hasDraftChanges = computed(() => {
+  const record = activeRecord.value
+  if (!record) return false
+  return contentDirty.value
+    || draft.value.title !== record.title
+    || draft.value.group !== record.group
+    || draft.value.enabledText !== (record.enabled ? 'enabled' : 'disabled')
+    || draft.value.isRequiredText !== (record.isRequired ? 'required' : 'optional')
+    || draft.value.usageMode !== record.usageMode
+    || draft.value.scope !== record.scope
+    || draft.value.scene !== record.scene
+    || Number(draft.value.priority) !== Number(record.priority)
+    || draft.value.summary !== record.summary
 })
-
-const currentDraftSnapshot = computed(() => JSON.stringify({
-  title: draft.value.title,
-  content: draft.value.content,
-  group: draft.value.group,
-  enabledText: draft.value.enabledText,
-  isRequiredText: draft.value.isRequiredText,
-  usageMode: draft.value.usageMode,
-  scope: draft.value.scope,
-  scene: draft.value.scene,
-  priority: draft.value.priority,
-  summary: draft.value.summary,
-  updatedAt: draft.value.updatedAt
-}))
-
-const hasDraftChanges = computed(() => activeRecordSnapshot.value !== currentDraftSnapshot.value)
 const deleteConfirmMessage = computed(() => {
   const title = deleteConfirm.value.title || '未命名提示词'
   return `确定删除“${title}”吗？删除后无法恢复。`
@@ -611,6 +602,7 @@ watch(
   activeRecord,
   (record) => {
     if (!record) return
+    contentDirty.value = false
     draft.value = {
       title: record.title,
       content: record.content,
@@ -624,9 +616,21 @@ watch(
       summary: record.summary,
       updatedAt: record.updatedAt
     }
+    void nextTick(() => {
+      if (contentTextareaRef.value) contentTextareaRef.value.value = record.content
+    })
   },
   { immediate: true }
 )
+
+function readContentDraft(): string {
+  return contentTextareaRef.value?.value ?? draft.value.content
+}
+
+function handleContentInput() {
+  // 长正文留在 textarea 自己的 DOM 缓冲中，避免每次输入都让 Vue 复制并重绘整篇提示词。
+  contentDirty.value = true
+}
 
 function formatUpdatedAt(value: string): string {
   const parsed = Date.parse(String(value || ''))
@@ -702,9 +706,10 @@ async function saveActiveRecord() {
   isSaving.value = true
   const updatedAt = new Date().toISOString()
   try {
+    const content = readContentDraft()
     await settingStore.updatePromptPreset(activeRecord.value.id, {
       name: draft.value.title.trim() || activeRecord.value.title,
-      content: draft.value.content,
+      content,
       promptGroup: draft.value.group,
       usageMode: draft.value.usageMode,
       isRequired: draft.value.isRequiredText === 'required',
@@ -715,6 +720,8 @@ async function saveActiveRecord() {
       enabled: draft.value.enabledText === 'enabled',
       updatedAt
     })
+    draft.value.content = content
+    contentDirty.value = false
     draft.value.updatedAt = updatedAt
     showNotice('已保存')
   } catch (error) {
@@ -730,7 +737,7 @@ async function duplicateActiveRecord() {
   await settingStore.addPromptPreset({
     id: '',
     name: `${draft.value.title || activeRecord.value.title || '提示词'} 副本`,
-    content: draft.value.content,
+    content: readContentDraft(),
     scene: draft.value.scene || 'all',
     frequency: 'always',
     enabled: draft.value.enabledText === 'enabled',
@@ -1183,7 +1190,9 @@ defineExpose({
 .prompt-library__textarea {
   min-height: 0;
   height: 100%;
-  resize: vertical;
+  resize: none;
+  overflow: auto;
+  overscroll-behavior: contain;
   line-height: 1.65;
   font-family: "Consolas", "Courier New", monospace;
 }

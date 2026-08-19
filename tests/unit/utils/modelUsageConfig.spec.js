@@ -44,8 +44,8 @@ describe('modelUsageConfig（四槽归一）', () => {
       presetName: 'Quick',
       model: 'quick-model',
       temperature: 0.1,
-      // 旧全局槽里的 effort 已退役，未给对话覆盖时跟随模型默认。
-      effort: '',
+      // 槽位 effort 作为默认值；具体 Agent 对话仍可临时覆盖。
+      effort: 'low',
       maxTokens: 128,
       thinking: 'disabled'
     })
@@ -90,5 +90,16 @@ describe('modelUsageConfig（四槽归一）', () => {
       .toMatchObject({ serviceTier: 'fast' })
     expect(buildModelUsageAiOptions(agentConfig, 'balanced'))
       .toMatchObject({ presetName: 'Codex桥', model: 'gpt-5.4', serviceTier: 'fast' })
+  })
+
+  it('Codex 努力程度随槽位保存并允许单次对话显式回到模型默认', () => {
+    const agentConfig = {
+      modelUsageConfigs: [
+        { id: 'balanced', label: '校书', presetName: 'Codex桥', model: 'gpt-5.6-sol', temperature: 0.7, maxTokens: 1024, thinking: 'disabled', effort: 'xhigh' }
+      ]
+    }
+
+    expect(buildModelUsageAiOptions(agentConfig, 'balanced')).toMatchObject({ effort: 'xhigh' })
+    expect(buildModelUsageAiOptions(agentConfig, 'balanced', { effort: '' })).toMatchObject({ effort: '' })
   })
 })

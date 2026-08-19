@@ -56,6 +56,58 @@ function mountSidebar(overrides = {}) {
 }
 
 describe('AppChatSidebar workspace modes', () => {
+  it('provides the left-column host for the scenario prompt tree', () => {
+    const wrapper = mountSidebar({
+      workspacePrimaryView: 'docs',
+      docSidebarState: {
+        activeTab: 'scenarioPrompt',
+        worldbook: {
+          treeVisible: true,
+          clusters: [],
+          selectedCount: 0,
+          clipboardMode: '',
+          clipboardHasData: false,
+          rows: [],
+          rowsByCluster: {}
+        },
+        prompt: { selectedId: '', totalCount: 0, rows: [] },
+        relation: { activeTab: 'candidates', predicatesCount: 0, candidatesCount: 0, confirmedCount: 0 }
+      }
+    })
+
+    expect(wrapper.text()).toContain('情境提示词')
+    expect(wrapper.find('#doc-scenario-prompt-tree-target').exists()).toBe(true)
+    expect(wrapper.find('#doc-scenario-prompt-actions-target').exists()).toBe(true)
+    expect(wrapper.get('#doc-scenario-prompt-actions-target').element.closest('.sidebar-section-title')).toBeTruthy()
+    expect(wrapper.find('[data-scenario-prompt-tree-host="true"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('keeps empty chat and role sidebars free of faint placeholder rows', () => {
+    const chat = mountSidebar({ chatSessionRows: [] })
+    expect(chat.find('.chat-session-empty').exists()).toBe(false)
+    expect(chat.text()).not.toContain('暂无会话')
+    chat.unmount()
+
+    const roles = mountSidebar({
+      workspacePrimaryView: 'roles',
+      desktopDisplayView: 'roles',
+      characters: []
+    })
+    expect(roles.text()).not.toContain('暂无角色')
+    roles.unmount()
+  })
+
+  it('uses the screenshot-width chat sidebar default', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/app/chat/AppChatSection.vue'),
+      'utf8'
+    )
+
+    expect(source).toMatch(/storageKey: 'langhuan_chat_sidebar_width',\s*defaultWidth: 334,/)
+  })
+
   it('shows chat, role and doc top entries', () => {
     const wrapper = mountSidebar()
 

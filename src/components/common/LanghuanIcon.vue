@@ -2,7 +2,7 @@
   <img
     class="langhuan-icon"
     :style="iconStyle"
-    :src="langhuanIconSvg"
+    :src="langhuanIconPng"
     :alt="title"
     draggable="false"
     :aria-hidden="title ? undefined : 'true'"
@@ -11,7 +11,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import langhuanIconSvg from '../../assets/langhuan-icon.svg'
+import langhuanIconPng from '../../assets/langhuan-icon.png'
 
 const props = withDefaults(defineProps<{
   size?: number | string

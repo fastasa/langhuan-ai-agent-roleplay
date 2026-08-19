@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildFastReplyPlanningHint, planFastReplySpeakers } from '../../../src/app/fastReplyPlanner.ts'
+import {
+  buildFastReplyPersonalityPlanCandidates,
+  buildFastReplyPlanningHint,
+  planFastReplySpeakers
+} from '../../../src/app/fastReplyPlanner.ts'
 
 const candidates = [
   { participantId: 'p1', characterId: 'c1', displayName: '甲', presenceState: 'present', reason: 'present' },
@@ -24,11 +28,23 @@ describe('fastReplyPlanner', () => {
     })[0]).toMatchObject({ characterId: 'c1', forced: true, order: 0 })
   })
 
-  it('builds a planning hint for Tidiao that tells later speakers to continue persisted replies', () => {
+  it('builds a direct-reply boundary that tells later speakers to continue persisted replies', () => {
     const hint = buildFastReplyPlanningHint({ speakerName: '乙', userText: '走进房间', priorSpeakerNames: ['甲'] })
     expect(hint).toContain('本轮已有这些角色先发言：甲')
     expect(hint).not.toContain('用户本轮输入：走进房间')
     expect(hint).not.toContain('全局提调')
     expect(hint).not.toContain('候选计划')
+  })
+
+  it('builds stable zero-LLM direct candidates for personality scoring without changing facts', () => {
+    const candidates = buildFastReplyPersonalityPlanCandidates('只承接当前互动。')
+    expect(candidates.map((item) => item.id)).toEqual([
+      'reuse_direct_natural',
+      'reuse_direct_intent',
+      'reuse_direct_character'
+    ])
+    expect(candidates[0].content).toBe('只承接当前互动。')
+    expect(candidates.every((item) => item.content.includes('只承接当前互动。'))).toBe(true)
+    expect(buildFastReplyPersonalityPlanCandidates('  ')).toEqual([])
   })
 })

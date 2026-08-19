@@ -137,6 +137,9 @@ function mountDocLibrary() {
       stubs: {
         DocLibraryStable: true,
         PromptLibraryPanel: true,
+        ScenarioPromptLibraryPanel: {
+          template: '<section class="scenario-prompt-library-stub">情境提示词页面</section>'
+        },
         RecallCompilePagePanel: true,
         SidebarFloatingMenu: true,
         UnitRelationBrainView: {
@@ -195,6 +198,25 @@ describe('DocLibrary relation panel', () => {
     expect(wrapper.text()).toContain('候选关系0')
     expect(wrapper.text()).toContain('当前没有待确认关系')
     expect(wrapper.text()).not.toContain('镜庭主城')
+
+    wrapper.unmount()
+  })
+
+  it('separates role prompts and scenario prompts into two document-library pages', async () => {
+    const wrapper = mountDocLibrary()
+    await flushPromises()
+
+    const tabLabels = wrapper.findAll('.leaf-docs__module-tab').map((button) => button.text())
+    expect(tabLabels).toEqual(['世界树', '关系', '角色提示词', '情境提示词'])
+
+    const scenarioTab = wrapper.findAll('.leaf-docs__module-tab')
+      .find((button) => button.text() === '情境提示词')
+    expect(scenarioTab).toBeTruthy()
+    await scenarioTab.trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.scenario-prompt-library-stub').exists()).toBe(true)
+    expect(wrapper.vm.getSidebarState().activeTab).toBe('scenarioPrompt')
 
     wrapper.unmount()
   })

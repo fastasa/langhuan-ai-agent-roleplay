@@ -106,7 +106,7 @@ export const mobile = {
     apiSummary: '{mode} · {count} presets',
     currentVersion: 'Current'
   },
-  // Mobile doc library workspace (library title reuses sidebar.navDocs, Prompts tab reuses docLibrary.topbar.promptTitle, Relation view reuses docLibrary.relation.viewLabel, Edit reuses common.edit, Open reuses chatList.open)
+  // Mobile doc library workspace (library title reuses sidebar.navDocs, prompt tabs reuse docLibrary.topbar titles, Relation view reuses docLibrary.relation.viewLabel, Edit reuses common.edit, Open reuses chatList.open)
   docWs: {
     aria: 'Mobile doc library',
     tabsAria: 'Doc library sections',
@@ -191,7 +191,10 @@ export const mobile = {
     loadModels: 'Load models',
     params: 'Params',
     catalogEmbedding: 'Catalog (embedding)',
-    catalogHint: 'Vector recall/retrieval embedding: Langhuan default embedding preset (managed server-side)',
+    catalogHint: 'Used for vector recall/retrieval; choose a local API preset that supports embeddings',
+    embeddingPresetPlaceholder: 'Choose embedding preset',
+    embeddingModelPlaceholder: 'Enter embedding model name',
+    embeddingDimensions: 'Vector dimensions',
     recallWriteStrategy: 'Recall & write-back strategy',
     recallWriteHint: 'Configure strategy and review params only',
     intentSnapshot: 'Intent snapshot',
@@ -224,6 +227,10 @@ export const mobile = {
     reasoningSummaryUnavailable: 'Reasoning summary (not returned by AGY)',
     reasoningSummaryOff: 'Do not return',
     reasoningSummaryOn: 'Return summary',
+    reasoningEffort: 'Reasoning effort',
+    followModelDefault: 'Follow model default',
+    followModelDefaultWithValue: 'Follow model default ({effort})',
+    savedEffort: 'Saved tier',
     fastService: 'Fast service',
     fastServiceHint: 'Use the fast service tier offered by the current Codex model',
     subtitleAgent: 'Model usage, recall & write-back',
