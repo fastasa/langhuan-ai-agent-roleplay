@@ -524,11 +524,12 @@ export interface TidiaoCorrectionAssembledContexts {
   lastScenarioBlock: string
 }
 
-/** 按会话快照装配纠偏上下文。返回 null = 目标定位失败（无活动轮重定向且目标楼层未命中），
- *  与聊天内入口「return null 不起 loop」同语义（守卫也在一处真值里）。 */
+/** 按会话快照装配纠偏上下文。返回 null = 目标定位失败（无活动轮重定向且目标楼层未命中）。
+ *  提调输入框的自由对话可显式允许无角色楼层锚：此时仍装配完整可见历史与工具上下文，targets 为空，
+ *  由提调自己回答或按用户意图读取/修改楼层，不再因为“没有上一条角色消息”而静默退出。 */
 export async function assembleTidiaoCorrectionContexts(
   source: TidiaoCorrectionSessionSource,
-  opts: { targetMessageId: number }
+  opts: { targetMessageId: number; allowUnanchoredChat?: boolean }
 ): Promise<TidiaoCorrectionAssembledContexts | null> {
   const sessionId = String(source.sessionId || '')
   const target = String(source.targetId || '')
@@ -539,11 +540,11 @@ export async function assembleTidiaoCorrectionContexts(
   // 批次C：一次取回观察数据派生两用——投影源图（喂 projectionContext）+ hidden 角色集（喂层3 消化过滤）。
   const observations = await loadDirectorProjectionObservations(sessionId)
   const projectionContext = createTidiaoMessageProjectionContext(list, observations.projectionMap)
-  // 被纠偏消息所在轮的用户消息（本轮锚）：目标消息往前找最近一条 user。
+  // 被纠偏消息所在轮的用户消息（本轮锚）：自由提调对话可以直接以用户消息本身为锚。
   const targetRoundAnchorMessageId = (() => {
     const targetIndex = list.findIndex((m) => Number(m?.id || 0) === targetId)
     if (targetIndex < 0) return 0
-    const anchorUser = [...list.slice(0, targetIndex)].reverse().find((m) => m?.role === 'user')
+    const anchorUser = [...list.slice(0, targetIndex + 1)].reverse().find((m) => m?.role === 'user')
     return Number(anchorUser?.id || 0)
   })()
   // 真机五验③：活动轮在场时纠偏针对的就是活动轮——分界锚/在屏目标/记忆基线整体重定向。
@@ -588,13 +589,13 @@ export async function assembleTidiaoCorrectionContexts(
         .filter((read): read is TidiaoAssemblyFloorRead => Boolean(read))
     : []
   const targetRead = activeRoundIsNewer ? (activeRoundReads[0] || null) : findFloorReadByMessageId(targetId)
-  if (!targetRead && !activeRoundIsNewer) return null
+  if (!targetRead && !activeRoundIsNewer && opts.allowUnanchoredChat !== true) return null
   // 重定向后的「主目标消息 id」：promptLog/发言角色/基线都以它为准；失败轮空场时为 0（相关能力自然降格）。
   const effectiveTargetId = targetRead ? Number(targetRead.messageId) : 0
-  const targets = (activeRoundIsNewer ? activeRoundReads : [targetRead!])
+  const targets = (activeRoundIsNewer ? activeRoundReads : (targetRead ? [targetRead] : []))
     .map((read) => ({ ref: read.ref, speakerName: read.speakerName, originalText: read.content }))
   // U3 群聊中策按发言角色解析（优先消息存的 speaker target id·兜底按发言名匹配角色库·单聊回退会话目标）。
-  const targetMessage = list.find((m) => Number(m?.id || 0) === effectiveTargetId) as Record<string, unknown> | undefined
+  const targetMessage = list.find((m) => Number(m?.id || 0) === (effectiveTargetId || targetId)) as Record<string, unknown> | undefined
   const speakerTargetId = (() => {
     if (!isMultiCharacterChatSession(source.session, target)) return target
     const stored = String(

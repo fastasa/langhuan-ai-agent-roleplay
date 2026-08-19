@@ -284,6 +284,6 @@ export const mobile = {
     tempCharacter: 'Temporary character',
     formalCharacter: 'Formal character',
     tdsPlaceholderResume: 'Reply to Director to continue this round',
-    tdsPlaceholderDefault: 'Director correction: just say what to change; include “Character 2” to precision-edit by floor'
+    tdsPlaceholderDefault: 'Message the Director Agent: ask a question or request a change; include “Character 2” to edit by floor'
   }
 }

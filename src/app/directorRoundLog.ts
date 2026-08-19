@@ -12,6 +12,7 @@
  *   （截断标注指向【4·已读资料】），完整原文由 harness 同轮挪进层4 容器；阈值判定与日志行共用 collapseToolResultText 同一折叠口径。
  *
  * 纯函数·可单测；只认 runtime 原生事件类型，不认 append log 形态（边界与 appendLogFeed 同口径单向）。
+ * semantic-compaction / journal-error 是运行时审计事件，不进入提调业务信息流；事件分支必须保持编译期穷尽。
  */
 
 import type { AgentRuntimeFidelityEvent } from './agentRuntime/runtime'
@@ -219,34 +220,49 @@ export function renderDirectorRoundLog(
   events: ReadonlyArray<AgentRuntimeFidelityEvent>,
   options: RenderDirectorRoundLogOptions = {}
 ): string {
-  const list = Array.isArray(events) ? events : []
+  // 显式保住元素联合类型；不让 Array.isArray 的 any[] 谓词抹掉 kind 穷尽检查。
+  const list: ReadonlyArray<AgentRuntimeFidelityEvent> = Array.isArray(events) ? events : []
   if (!list.length) return ''
   const resultLimit = Number(options.resultLimit || 0)
   const lines: string[] = []
   for (const event of list) {
-    if (event.kind === 'assistant-message') {
-      const thought = parseThought(event.content)
-      if (thought) lines.push(`- 旁述：${thought}`)
-      continue
-    }
-    if (event.kind === 'tool-call') {
-      const args = previewToolArgs(event.toolCall.args)
-      lines.push(`- 调用 ${event.toolCall.toolName}${args ? `（${args}）` : ''}`)
-      continue
-    }
-    // tool-result：成功=结果全文（折叠空白·按 resultLimit 截）；error/blocked=加粗报错行（报错也输出原则）。
-    const result = event.toolResult
-    if (result.status === 'success') {
-      const full = collapseToolResultText(result.content)
-      const note = String(options.truncatedNote || '').trim()
-      const shown = resultLimit > 0 && full.length > resultLimit
-        ? `${full.slice(0, resultLimit)}…（已截断${note ? `·${note}` : ''}）`
-        : full
-      lines.push(`- ↳ 结果：${shown || '（空）'}`)
-    } else {
-      const type = String(result.error?.type || result.status || '').trim()
-      const message = String(result.error?.message || result.content || '').replace(/\s+/g, ' ').trim()
-      lines.push(`- ↳ **报错（${type}）：${message}**`)
+    switch (event.kind) {
+      case 'assistant-message': {
+        const thought = parseThought(event.content)
+        if (thought) lines.push(`- 旁述：${thought}`)
+        break
+      }
+      case 'tool-call': {
+        const args = previewToolArgs(event.toolCall.args)
+        lines.push(`- 调用 ${event.toolCall.toolName}${args ? `（${args}）` : ''}`)
+        break
+      }
+      case 'tool-result': {
+        // 成功=结果全文（折叠空白·按 resultLimit 截）；error/blocked=加粗报错行（报错也输出原则）。
+        const result = event.toolResult
+        if (result.status === 'success') {
+          const full = collapseToolResultText(result.content)
+          const note = String(options.truncatedNote || '').trim()
+          const shown = resultLimit > 0 && full.length > resultLimit
+            ? `${full.slice(0, resultLimit)}…（已截断${note ? `·${note}` : ''}）`
+            : full
+          lines.push(`- ↳ 结果：${shown || '（空）'}`)
+        } else {
+          const type = String(result.error?.type || result.status || '').trim()
+          const message = String(result.error?.message || result.content || '').replace(/\s+/g, ' ').trim()
+          lines.push(`- ↳ **报错（${type}）：${message}**`)
+        }
+        break
+      }
+      case 'semantic-compaction':
+      case 'journal-error':
+        // 它们由各自的审计面消费；写进层5 会污染提调对业务动作的认知。
+        break
+      default: {
+        // 编译期穷尽门：新增 runtime 事件时必须在这里显式决定展示语义。
+        const unhandledEvent: never = event
+        void unhandledEvent
+      }
     }
   }
   return lines.join('\n')

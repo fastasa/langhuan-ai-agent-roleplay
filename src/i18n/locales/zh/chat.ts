@@ -394,7 +394,6 @@ export const chat = {
   selectCharToStart: '请选择一个角色开始聊天',
   loadMoreMessages: '加载更早消息',
   loadingShort: '加载中',
-  debugInfo: '调试信息',
   itemsCount: '{count} 条',
   messageImage: '消息图片',
   // 过程动效标签（显示用·非比较值）
@@ -404,8 +403,6 @@ export const chat = {
   recalling: '正在召回',
   // 发送者/头像/楼层（显示用）
   narrationBadge: '旁',
-  debugBadge: '调',
-  narrationDebug: '旁白调试',
   meFallback: '我',
   floorItemFallback: '第 {index} 条',
   editUserInfo: '编辑用户信息',

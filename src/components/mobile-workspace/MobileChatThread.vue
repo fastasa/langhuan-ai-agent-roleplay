@@ -69,10 +69,11 @@
       </button>
 
       <template v-for="(message, index) in currentMessages" :key="resolveMessageKey(message, index)">
+        <template v-if="!isDebugMessage(message)">
         <!-- 提调带（2026-07-04 移动端接坞）：历史轮内联带已移除，历史轮 + 活动轮统一收进顶部提调坞
              TidiaoDirectorDock（壳上 ‹ N/M › 切轮回看）；轮分组数据源 roundDirectorStreamGroups 保留供坞消费。 -->
         <div
-          v-if="isNarrationMessage(message) || isDebugMessage(message)"
+          v-if="isNarrationMessage(message)"
           class="mobile-chat-narration"
           :data-chat-message-id="messageNumericId(message)"
           :data-chat-message-index="index"
@@ -270,6 +271,7 @@
         </div>
         <!-- 提调真·导演 loop 轮级流式载体（2026-07-04 移动端接坞）：不再内联锚在用户消息后，
              改由顶部提调坞承载（directorDockRounds 里 live=true 的最后一轮）。 -->
+        </template>
       </template>
 
       <div v-if="showStreamingMessage" class="mobile-chat-ai">
@@ -297,7 +299,7 @@
            与桌面 TidiaoPrecisionEditBar 同一橄榄绿皮（#6e7c57/米白字/「提调」按钮有字反白）——联动能力：外观统一调整需同步那一处。
            默认收成主输入框顶缘约 20px「绿舌」（场记板图标+「提调」）；点舌展开橄榄绿条（底缘略叠入输入框身后·
            触屏无 hover 上浮语义）；右侧收起 chevron；输入为空时点条外也收回；correcting（提调问用户挂起）自动展开+聚焦，
-           占位换「回复提调，续跑本轮」。智能二选一逻辑不动（用户 2026-06-20）：带楼层号按楼层精修；不带整段纠偏续跑。 -->
+           占位换「回复提调，续跑本轮」。输入即与提调 Agent 对话：带楼层号按楼层精修；自由文本据当前会话回答或执行修改。 -->
       <div
         v-if="chatVm.currentTarget && state.chatActions.applyDirectorPrecisionEdits"
         ref="tdsZoneRef"

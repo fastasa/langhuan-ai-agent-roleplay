@@ -288,7 +288,7 @@ export function useChatMessageOps({
   /** 批次 M3：提调式锚定精修——按楼层引用对会话消息做精修，返回累积改动（不写库，由本处逐条作新版本写回）；返回 null=软停/取消/无目标。 */
   editChatMessagesViaDirector?: (refsText: string, options?: { correctionText?: string; anchorMessageId?: number; onEditCommitted?: (commit: { messageId: number; ref: string; content: string }) => void | Promise<void> }) => Promise<{ edits: Array<{ messageId: number; ref: string; speakerName: string; content: string }>; reprojectTargets?: Array<{ messageId: number; ref: string; speakerName: string }>; directorStream?: TidiaoDirectorStream | null; anchorAssistantMessageId?: number } | null>
   /** 批次 P3a：纠偏三策统一 loop——对某条已落库消息发纠偏，提调自主上→中→下择优；返回 strategy + 三类终态产物（不写库，由本处据 strategy 写回或转 replan）；返回 null=软停/取消/无目标。 */
-  correctChatMessageViaDirector?: (targetMessageId: number, options?: { correctionText?: string; anchorMessageId?: number; userInstruction?: string; onRegenerateBegin?: (messageId: number) => void; onEditCommitted?: (commit: { messageId: number; ref: string; content: string }) => void | Promise<void>; onRegenerated?: (regen: { messageId: number; ref: string; speakerName: string; content: string; promptLogId: string }) => void | Promise<void> }) => Promise<{ strategy: 'direct-edit' | 'prompt-regen' | 'escalate' | 'create-narration' | 'create-cast' | 'ask-user' | 'chat-only' | 'resume-orchestration'; edits: Array<{ messageId: number; ref: string; speakerName: string; content: string }>; regenerations: Array<{ messageId: number; ref: string; speakerName: string; content: string; promptLogId: string }>; escalation: { reason: string } | null; narrationCreations: Array<{ messageId: number; content: string; profileName: string }>; castCreations?: Array<{ speakerName: string; ok: boolean; message?: string }>; reprojectTargets?: Array<{ messageId: number; ref: string; speakerName: string }>; directorStream?: TidiaoDirectorStream | null; anchorAssistantMessageId?: number; escalationHandledInline?: boolean; resumeHandledInline?: boolean } | null>
+  correctChatMessageViaDirector?: (targetMessageId: number, options?: { correctionText?: string; anchorMessageId?: number; userInstruction?: string; allowUnanchoredChat?: boolean; onRegenerateBegin?: (messageId: number) => void; onEditCommitted?: (commit: { messageId: number; ref: string; content: string }) => void | Promise<void>; onRegenerated?: (regen: { messageId: number; ref: string; speakerName: string; content: string; promptLogId: string }) => void | Promise<void> }) => Promise<{ strategy: 'direct-edit' | 'prompt-regen' | 'escalate' | 'create-narration' | 'create-cast' | 'ask-user' | 'chat-only' | 'resume-orchestration'; edits: Array<{ messageId: number; ref: string; speakerName: string; content: string }>; regenerations: Array<{ messageId: number; ref: string; speakerName: string; content: string; promptLogId: string }>; escalation: { reason: string } | null; narrationCreations: Array<{ messageId: number; content: string; profileName: string }>; castCreations?: Array<{ speakerName: string; ok: boolean; message?: string }>; reprojectTargets?: Array<{ messageId: number; ref: string; speakerName: string }>; directorStream?: TidiaoDirectorStream | null; anchorAssistantMessageId?: number; escalationHandledInline?: boolean; resumeHandledInline?: boolean } | null>
   /** 批次1(D)：续接时读回这条消息「已落库提调带」记录的「用户原始纠偏指令」（无则空串）。 */
   resolveDirectorOriginalInstruction?: (messageId: number) => Promise<string>
   prepareAIRecall?: (charId: string, options?: { taskRunId?: string; abortSignal?: AbortSignal; skipRecallToFinalConfirmation?: boolean; visibleMessagesOverride?: unknown[] }) => Promise<void>
@@ -2098,7 +2098,7 @@ export function useChatMessageOps({
     targetMessageId: number,
     correctionText: string,
     // 批次1(D)：userInstruction = 要落库的「用户原始纠偏指令」纯原文（续接时显式传，防把续接说明当原始指令再存）。
-    options: { anchorMessageId?: number; userInstruction?: string } = {}
+    options: { anchorMessageId?: number; userInstruction?: string; allowUnanchoredChat?: boolean } = {}
   ): Promise<boolean> {
     if (typeof correctChatMessageViaDirector !== 'function') return false
     // B3：中策「依提示词重生成整条消息」执行到重生成那一步时，把目标消息切到现有重试占位（复用 regeneratingMessageIndex + isTyping）。
@@ -2202,6 +2202,8 @@ export function useChatMessageOps({
     for (let i = list.length - 1; i >= 0; i -= 1) {
       const m = list[i]
       if (!m || m.role === 'user') continue
+      const messageKind = String((m as any).messageKind ?? (m as any).message_kind ?? '').trim()
+      if (messageKind === 'narration_debug') continue
       if (isNarrationMessage(m as any) || isCustomNarrationMessage(m)) continue
       if (isCapsReplyMessage(m)) continue
       return i
@@ -2285,7 +2287,22 @@ export function useChatMessageOps({
     if (!isContinuation && parseChatFloorRefs(text).length === 0) {
       const lastIndex = findLastDirectorCorrectableIndex()
       if (lastIndex < 0) {
-        toast('还没有可纠偏的上一轮编排，请先发一条消息再纠偏', 'warning')
+        // 提调框就是和提调 Agent 说话：即使尚无角色楼层，也用最近一条非调试消息作锚启动正式 loop。
+        // targets 为空只是“没有默认修改对象”，不再等价于“不唤起 Agent”。
+        const anchorIndex = [...currentMessages.value]
+          .map((message, index) => ({ message, index }))
+          .reverse()
+          .find(({ message }) => Number(message?.id || 0) > 0
+            && String((message as any)?.messageKind ?? (message as any)?.message_kind ?? '').trim() !== 'narration_debug')
+          ?.index ?? -1
+        const anchorMessageId = Number(currentMessages.value[anchorIndex]?.id || 0)
+        if (anchorMessageId > 0 && typeof correctChatMessageViaDirector === 'function') {
+          return await runDirectorCorrection(anchorMessageId, text, {
+            anchorMessageId,
+            allowUnanchoredChat: true
+          })
+        }
+        toast('当前会话还没有可挂载提调回复的消息，请先发送一条聊天消息', 'warning')
         return false
       }
       // 批次P3a：自由文本纠偏先走「三策统一 loop」（提调自主 上策改原文→中策改提示词/按原提示重生成→下策重排 择优）；

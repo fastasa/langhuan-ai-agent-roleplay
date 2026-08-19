@@ -225,6 +225,10 @@ import {
   createEmptySingleChatRunResult,
   type SingleChatRunResult
 } from '../../app/chatSpeakerGeneration'
+import {
+  buildFinalRoleFailureMessage,
+  classifyEmptyFinalReplyError
+} from '../../app/finalRoleFailureMessage'
 import { setPendingCorrection } from '../../app/chatCorrectionState'
 import { rollbackPersistedNarrationMessages } from '../../app/narrationSideEffectRollback'
 import {
@@ -303,7 +307,6 @@ import {
 import { createDirectorStreamPersist } from '../../app/directorStreamPersist'
 import { createChatTurnRunner } from '../../app/chatTurnRunner'
 import type { ChatTurnInputKind, ChatTurnReplyMode } from '../../app/chatTurnTypes'
-import { formatNarrationDebugBlock } from '../../app/narrationDebugFormat'
 import { collectMessagesByRounds } from '../../app/characterBrainRecallAI'
 import {
   SESSION_MEMORY_KEEP_RECENT,
@@ -689,7 +692,6 @@ interface UseChatSendPipelineContext {
       detail?: string
     }) => void
   }
-  canSeeNarrationDebug?: boolean | (() => boolean)
 }
 
 // 批次4：同一会话的滚动记忆压缩单飞。真正的增量边界持久化在
@@ -1064,8 +1066,7 @@ export function useChatSendPipeline({
   toast,
   confirm,
   prompt,
-  runtimeStore,
-  canSeeNarrationDebug
+  runtimeStore
 }: UseChatSendPipelineContext) {
   // 原生工具调用客户端解析：优先用注入的 callAIWithTools；注入缺失（注入链漏接）时兜底从 useAI() 自取并缓存。
   // 仅在真要调用且注入缺失时才创建一次 useAI 实例（callAIWithTools 自带 initStores、不依赖注入参数即可工作）。
@@ -3020,134 +3021,6 @@ export function useChatSendPipeline({
     })
   }
 
-  function classifyEmptyFinalReplyError(input: {
-    returnedText: unknown
-    streamedText: string
-    normalizedReply: string
-    cleanedReply: string
-    visibleReply: string
-  }): string {
-    const returnedText = String(input.returnedText ?? '')
-    const streamedText = String(input.streamedText || '')
-    const normalizedReply = String(input.normalizedReply || '')
-    const cleanedReply = String(input.cleanedReply || '')
-    const visibleReply = String(input.visibleReply || '')
-    if (!returnedText.trim() && !streamedText.trim()) {
-      return '模型原始返回为空：returnedText 和流式累积内容都为空。'
-    }
-    if (/<think>[\s\S]*?<\/think>/i.test(cleanedReply) && !visibleReply) {
-      return '模型只返回了思考过程：<think> 块剥离后没有可见正文。'
-    }
-    if (normalizedReply.trim() && !cleanedReply.trim()) {
-      return '角色名前缀 / 回复前缀清理后为空：模型返回内容被 cleanAiPrefix 清空。'
-    }
-    if (cleanedReply.trim() && !visibleReply) {
-      return '清洗后只剩不可见内容：剥离思考块或回复标记后没有正文。'
-    }
-    return '最终回复正文不可保存：模型返回值存在，但没有通过可见正文校验。'
-  }
-
-  function buildEmptyFinalReplyDebugContent(input: {
-    errorKind: string
-    targetId: string
-    speakerTargetId: string
-    speakerName: string
-    sessionId: string
-    inputMessageId?: number
-    attemptId?: string
-    promptLogId?: string
-    usedModel?: string
-    returnedText: unknown
-    streamedText: string
-    normalizedReply: string
-    cleanedReply: string
-    visibleReply: string
-  }): string {
-    const returnedText = input.returnedText == null ? '' : String(input.returnedText)
-    const streamedText = String(input.streamedText || '')
-    const normalizedReply = String(input.normalizedReply || '')
-    const cleanedReply = String(input.cleanedReply || '')
-    const visibleReply = String(input.visibleReply || '')
-    const payload = {
-      errorKind: input.errorKind,
-      targetId: input.targetId,
-      speakerTargetId: input.speakerTargetId,
-      speakerName: input.speakerName,
-      sessionId: input.sessionId,
-      inputMessageId: input.inputMessageId || 0,
-      attemptId: input.attemptId || '',
-      promptLogId: input.promptLogId || '',
-      usedModel: input.usedModel || '',
-      returnedText,
-      streamedText,
-      normalizedReply,
-      cleanedReply,
-      visibleReplyAfterThoughtStrip: visibleReply,
-      lengths: {
-        returnedText: returnedText.length,
-        streamedText: streamedText.length,
-        normalizedReply: normalizedReply.length,
-        cleanedReply: cleanedReply.length,
-        visibleReply: visibleReply.length
-      },
-      providerRawJson: '当前 callAIStream 协议未把供应商原始 SSE JSON 回传到发送链路；此处输出的是发送链路收到的完整返回字符串和流式累积字符串。'
-    }
-    return [
-      '【琅嬛最终回复空正文失败】',
-      '',
-      `错误类型：${input.errorKind}`,
-      `角色：${input.speakerName || input.speakerTargetId || input.targetId}`,
-      `模型：${input.usedModel || '未回传模型名'}`,
-      `提示词日志：${input.promptLogId || '未记录'}`,
-      '',
-      '最终模型返回数据：',
-      '```json',
-      JSON.stringify(payload, null, 2),
-      '```'
-    ].join('\n')
-  }
-
-  async function appendEmptyFinalReplyDebugMessage(input: {
-    targetId: string
-    sessionId: string
-    content: string
-  }) {
-    if (!input.sessionId) return
-    const envSnapshot = getCurrentEnvironmentSnapshot()
-    const message: MessagePayload = {
-      role: 'assistant',
-      messageKind: 'narration_debug',
-      message_kind: 'narration_debug',
-      name: '最终回复诊断',
-      memberName: '最终回复诊断',
-      content: input.content,
-      time: new Date().toLocaleTimeString(),
-      envDate: envSnapshot.envDate,
-      envWeather: envSnapshot.envWeather,
-      envLocation: envSnapshot.envLocation,
-      model: ''
-    }
-    try {
-      const persistedId = await chatStore.addMessage(input.targetId, message, { skipLocalSync: true, sessionId: input.sessionId })
-      queuePendingPersistedMessage(chatStore, input.sessionId || input.targetId, {
-        id: typeof persistedId === 'number' ? persistedId : 0,
-        ...message,
-        memberName: message.memberName || message.name,
-        _targetId: input.targetId,
-        _sessionId: input.sessionId
-      })
-    } catch (error) {
-      console.warn('最终回复空正文诊断消息保存失败:', error)
-      queuePendingPersistedMessage(chatStore, input.sessionId || input.targetId, {
-        id: `debug_empty_final_reply_${Date.now()}`,
-        ...message,
-        memberName: message.memberName || message.name,
-        _targetId: input.targetId,
-        _sessionId: input.sessionId
-      })
-    }
-  }
-
   function resolveReplyTargetCharacter(targetId: string): CharacterLike | null {
     const session = getChatStoreCurrentSession(chatStore)
     const participantIds = normalizeChatSessionCharacterParticipants(session)
@@ -4427,27 +4300,6 @@ export function useChatSendPipeline({
       .map((prompt) => prompt.content)
       .join('\n\n')
   }
-
-  function buildGateAuditPayload(content: string, model = ''): Record<string, unknown> {
-    const envSnapshot = getCurrentEnvironmentSnapshot()
-    return {
-      role: 'assistant',
-      messageKind: 'narration_debug',
-      message_kind: 'narration_debug',
-      name: '角色出场地点门禁',
-      memberName: '角色出场地点门禁',
-      content,
-      time: new Date().toLocaleTimeString(),
-      model,
-      envDate: envSnapshot.envDate,
-      envWeather: envSnapshot.envWeather,
-      envLocation: envSnapshot.envLocation,
-      createdAt: new Date().toISOString()
-    }
-  }
-
-
-
 
   function readMessageTextField(message: Record<string, unknown> | null | undefined, camel: string, snake: string) {
     return String(message?.[camel] ?? message?.[snake] ?? '').trim()
@@ -6113,48 +5965,42 @@ export function useChatSendPipeline({
             }
           }
         )
-      let returnedText: string | null = null
-      try {
-        returnedText = await callFinalRoleModel()
-      } catch (error) {
-        if (!isPersonalityModelReply || isAbortError(error)) throw error
-        markReplySituationCheckpointFailure(error)
-        const promptLogId = String(localMessageTargets.get(`${localMessageKey}:prompt-log`) || '')
-        const failureContent = [
-          '【最终角色模型调用失败】',
-          '',
-          `错误：${getErrorMessage(error)}`,
-          '',
-          '本轮在最终角色模型调用处中断；已完成到哪一步请以这条消息的执行审计为准。',
-          '可以对这条角色消息使用“按原提示词重试”，只重放最后一次角色模型调用。'
-        ].join('\n')
-        const failureMessage: MessagePayload & Record<string, unknown> = {
-          role: 'assistant',
-          content: failureContent,
-          messageKind: 'chat',
-          message_kind: 'chat',
-          includeInContext: false,
-          include_in_context: false,
-          time: new Date().toLocaleTimeString(),
-          name: speakerName,
-          memberName: speakerName,
-          memberTargetId: speakerTargetId || undefined,
-          member_target_id: speakerTargetId || undefined,
-          speakerTargetId: speakerTargetId || undefined,
-          speaker_target_id: speakerTargetId || undefined,
+      const persistFinalRoleFailure = async (input: {
+        error: unknown
+        errorText: string
+        promptLogId: string
+        failureStage: string
+      }): Promise<SingleChatRunResult> => {
+        let insertAfterMessageIdOverride: number | undefined
+        if (options.beforePersist) {
+          const gateResult = await options.beforePersist()
+          assertPipelineCanContinue(runId, taskRunId)
+          if (gateResult && typeof (gateResult as { insertAfterMessageId?: number }).insertAfterMessageId === 'number') {
+            insertAfterMessageIdOverride = (gateResult as { insertAfterMessageId?: number }).insertAfterMessageId
+          }
+        }
+        const effectiveLocalInsertAfterMessageId = insertAfterMessageIdOverride ?? localInsertAfterMessageId
+        const failureMessage = buildFinalRoleFailureMessage({
+          error: input.errorText,
+          speakerName,
+          speakerTargetId: speakerTargetId || target,
           envDate: envSnapshot.envDate,
           envWeather: envSnapshot.envWeather,
           envLocation: envSnapshot.envLocation,
-          model: usedModel || ''
-        }
-        const failureMessageId = Number(await chatStore.addMessage(target, failureMessage as MessagePayload, { skipLocalSync: true, sessionId }) || 0)
+          model: usedModel
+        }) as MessagePayload & Record<string, unknown>
+        const failureMessageId = Number(await chatStore.addMessage(
+          target,
+          failureMessage as MessagePayload,
+          { skipLocalSync: true, sessionId }
+        ) || 0)
         clearStreamingBubbleState(target)
         const finalizedFailure = finalizeStreamingMessage(chatStore, sessionId || target, localMessageKey, {
           id: failureMessageId,
           ...failureMessage,
           memberName: failureMessage.name,
           _sessionId: sessionId,
-          _localInsertAfterMessageId: localInsertAfterMessageId
+          _localInsertAfterMessageId: effectiveLocalInsertAfterMessageId
         })
         if (finalizedFailure === false) {
           queuePendingPersistedMessage(chatStore, sessionId || target, {
@@ -6163,15 +6009,16 @@ export function useChatSendPipeline({
             memberName: failureMessage.name,
             _targetId: target,
             _sessionId: sessionId,
-            _localInsertAfterMessageId: localInsertAfterMessageId
+            _localInsertAfterMessageId: effectiveLocalInsertAfterMessageId
           })
         }
-        if (promptLogId && failureMessageId > 0) {
+        if (failureMessageId > 0) options.onAssistantPersisted?.(failureMessageId)
+        if (input.promptLogId && failureMessageId > 0) {
           try {
             if (sessionId) {
-              await bindChatPromptLogMessageBySessionId(sessionId, promptLogId, failureMessageId)
+              await bindChatPromptLogMessageBySessionId(sessionId, input.promptLogId, failureMessageId)
             } else {
-              await bindChatPromptLogMessage(target, promptLogId, failureMessageId)
+              await bindChatPromptLogMessage(target, input.promptLogId, failureMessageId)
             }
           } catch (bindError) {
             console.error('绑定最终失败消息提示词日志失败:', bindError)
@@ -6186,19 +6033,33 @@ export function useChatSendPipeline({
             sessionId,
             status: 'failed',
             assistantMessageIds: failureMessageId > 0 ? [failureMessageId] : [],
-            outputPromptLogId: promptLogId,
-            error
+            outputPromptLogId: input.promptLogId,
+            error: input.error
           })
         }
-        failNormalMessageTaskRun(taskRunId, error)
-        await persistReplyExecutionFailureReceipt(error, promptLogId, failureMessageId, 'final_reply_generation')
-        await persistPersonalityModelFailureTrace(error, promptLogId, failureMessageId, 'final_reply_generation')
-        toast('最终角色模型调用失败，已保存为可重试角色消息', 'warning', 10000)
+        failNormalMessageTaskRun(taskRunId, input.error)
+        await persistReplyExecutionFailureReceipt(input.error, input.promptLogId, failureMessageId, input.failureStage)
+        await persistPersonalityModelFailureTrace(input.error, input.promptLogId, failureMessageId, input.failureStage)
+        toast('角色消息生成失败，已按原角色保存为可重试消息', 'warning', 10000)
         return {
           assistantMessageIds: failureMessageId > 0 ? [failureMessageId] : [],
           firstMessageId: failureMessageId,
-          firstContent: failureContent
+          firstContent: failureMessage.content
         }
+      }
+      let returnedText: string | null = null
+      try {
+        returnedText = await callFinalRoleModel()
+      } catch (error) {
+        if (isAbortError(error)) throw error
+        markReplySituationCheckpointFailure(error)
+        const promptLogId = String(localMessageTargets.get(`${localMessageKey}:prompt-log`) || '')
+        return await persistFinalRoleFailure({
+          error,
+          errorText: getErrorMessage(error),
+          promptLogId,
+          failureStage: 'final_reply_generation'
+        })
       }
 
       assertPipelineCanContinue(runId, taskRunId)
@@ -6219,36 +6080,14 @@ export function useChatSendPipeline({
           cleanedReply,
           visibleReply
         })
-        removeStreamingMessage(chatStore, sessionId || target, localMessageKey)
-        localMessageTargets.delete(localMessageKey)
-        localMessageSessions.delete(localMessageKey)
         const emptyReplyError = new Error('模型调用成功，但没有返回可保存的可见正文')
-        const debugContent = buildEmptyFinalReplyDebugContent({
-          errorKind: emptyReplyErrorKind,
-          targetId: target,
-          speakerTargetId: speakerTargetId || target,
-          speakerName,
-          sessionId,
-          inputMessageId,
-          attemptId: generationAttemptId || '',
+        markReplySituationCheckpointFailure(emptyReplyError)
+        return await persistFinalRoleFailure({
+          error: emptyReplyError,
+          errorText: emptyReplyErrorKind,
           promptLogId,
-          usedModel,
-          returnedText,
-          streamedText: fullReply,
-          normalizedReply,
-          cleanedReply,
-          visibleReply
+          failureStage: 'final_reply_validation'
         })
-        await appendEmptyFinalReplyDebugMessage({
-          targetId: target,
-          sessionId,
-          content: debugContent
-        })
-        await failSingleChatAttempt(emptyReplyError, promptLogId)
-        await persistReplyExecutionFailureReceipt(emptyReplyError, promptLogId, 0, 'final_reply_validation')
-        await persistPersonalityModelFailureTrace(emptyReplyError, promptLogId, 0, 'final_reply_validation')
-        toast(`模型调用成功，但没有返回可保存的可见正文；已在聊天区输出诊断：${emptyReplyErrorKind}`, 'warning', 10000)
-        return createEmptySingleChatRunResult()
       }
       emitProcessStep('compose', 'done')
       // 批次4：回复收尾后台触发滚动会话记忆压缩（fire-and-forget，失败不影响回复；非 ReplyWorkflow 路径
@@ -9913,6 +9752,8 @@ export function useChatSendPipeline({
       /** 批次1(D)·续接带原始指令：要落库的「用户原始纠偏指令」纯原文（续接时回灌用户的命令）。
        *  缺省（首次纠偏）= 用 correctionText 作原始指令；续接时由调用方显式传「读回的纯原始指令」（避免把续接说明文本当原始指令再存、防嵌套）。 */
       userInstruction?: string
+      /** 提调框自由对话：没有可纠偏角色楼层时，仍以最近用户消息为锚启动正式提调轮。 */
+      allowUnanchoredChat?: boolean
     } = {}
   ): Promise<{
     strategy: TidiaoCorrectionStrategy
@@ -9952,7 +9793,10 @@ export function useChatSendPipeline({
       messages: list,
       groups: (charStore.groups || []) as unknown as Array<Record<string, unknown>>,
       characters: (Array.isArray(charStore.characters) ? charStore.characters : []) as unknown as Array<Record<string, unknown>>
-    }, { targetMessageId: targetId })
+    }, {
+      targetMessageId: targetId,
+      ...(options.allowUnanchoredChat ? { allowUnanchoredChat: true } : {})
+    })
     if (!assembly) return null
     const {
       readContext,

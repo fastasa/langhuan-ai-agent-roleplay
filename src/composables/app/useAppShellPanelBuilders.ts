@@ -224,35 +224,6 @@ function readBrainAgentConfig(ctx: any) {
   return configs.find((item: any) => String(item?.id || '').trim() === 'brain_agent') || null
 }
 
-function appendManualSummaryDebugMessage(ctx: any, input: {
-  sessionId: string
-  targetId: string
-  content: string
-}) {
-  const content = String(input.content || '').trim()
-  if (!content) return
-  const message = {
-    id: `debug_chat_summary_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    role: 'assistant',
-    messageKind: 'narration_debug',
-    message_kind: 'narration_debug',
-    name: '总结调试',
-    memberName: '总结调试',
-    content,
-    time: new Date().toLocaleTimeString(),
-    _targetId: input.targetId,
-    _sessionId: input.sessionId
-  }
-  const targetKey = input.sessionId || input.targetId
-  if (typeof ctx.chatStore?.queuePendingPersistedMessage === 'function') {
-    ctx.chatStore.queuePendingPersistedMessage(targetKey, message)
-  } else {
-    const messages = getChatStoreCurrentMessages(ctx.chatStore)
-    if (Array.isArray(messages)) messages.push(message)
-  }
-  ctx.scrollToBottom?.()
-}
-
 function startSummaryAgentNotice(ctx: any, input: {
   message: string
   step: string
@@ -465,9 +436,7 @@ async function runConfirmedChatSummaryToTrace(ctx: any) {
     message: '正在准备总结对话',
     step: '启动总结'
   })
-  let formatNarrationDebugBlock = (title: string, lines: string[]) => `【${title}】${lines.filter(Boolean).join('；')}`
   try {
-    ;({ formatNarrationDebugBlock } = await import('../../app/narrationDebugFormat'))
     const characterOptions = resolveProjectionWritebackCharacterOptions(ctx, session, targetId)
     const selectedCharacterIds = requestManualProjectionWritebackCharacters(ctx, characterOptions)
     if (!selectedCharacterIds.length) {
@@ -475,24 +444,11 @@ async function runConfirmedChatSummaryToTrace(ctx: any) {
         message: '未选择写入角色',
         step: '已取消'
       })
-      appendManualSummaryDebugMessage(ctx, {
-        sessionId,
-        targetId,
-        content: formatNarrationDebugBlock('总结对话', ['已取消：没有选择要写入轨迹的角色。'])
-      })
       return
     }
-    const selectedNames = selectedCharacterIds
-      .map((id) => getCharacterDisplayName(ctx, id) || id)
-      .join('、')
     updateSummaryAgentNotice(ctx, summaryNoticeId, {
       message: '正在按角色写入投影轨迹',
       step: '投影写轨迹'
-    })
-    appendManualSummaryDebugMessage(ctx, {
-      sessionId,
-      targetId,
-      content: formatNarrationDebugBlock('总结对话', [`开始写入：选中角色 ${selectedNames || '未命名角色'}，使用当前角色可见投影写入轨迹。`])
     })
     const results = await runProjectionWritebackForCharacters(ctx, {
       sessionId,
@@ -505,14 +461,6 @@ async function runConfirmedChatSummaryToTrace(ctx: any) {
     const detailLines = results.map((item) => {
       if (item.error) return `${item.characterName}：异常：${item.error instanceof Error ? item.error.message : String(item.error)}`
       return `${item.characterName}：${summarizeProjectionWritebackResult(item.result || {})}`
-    })
-    appendManualSummaryDebugMessage(ctx, {
-      sessionId,
-      targetId,
-      content: formatNarrationDebugBlock('总结对话', [
-        failed.length ? '完成但有失败角色' : skipped.length === results.length ? '未写入：所选角色都未达到写入窗口。' : '完成：投影写轨迹已执行。',
-        ...detailLines
-      ])
     })
     if (failed.length) {
       failSummaryAgentNotice(ctx, summaryNoticeId, {
@@ -528,11 +476,6 @@ async function runConfirmedChatSummaryToTrace(ctx: any) {
       })
     }
   } catch (error) {
-    appendManualSummaryDebugMessage(ctx, {
-      sessionId,
-      targetId,
-      content: formatNarrationDebugBlock('总结对话', [`异常：${error instanceof Error ? error.message : String(error)}`])
-    })
     failSummaryAgentNotice(ctx, summaryNoticeId, {
       message: '总结对话异常',
       step: '总结异常',

@@ -43,8 +43,7 @@ export function useAppShellCommandFlow(ctx: any) {
     mentionSelectedChars: ctx.mentionSelectedChars,
     mentionExcludedChars: ctx.mentionExcludedChars,
     takeImageAttachments: ctx.takeImageAttachments,
-    filteredAtCharacters: ctx.filteredAtCharacters,
-    canSeeNarrationDebug: ctx.canSeeNarrationDebug
+    filteredAtCharacters: ctx.filteredAtCharacters
   })
   getAIOptionsForTickets = chatDomain.getAIOptions
 

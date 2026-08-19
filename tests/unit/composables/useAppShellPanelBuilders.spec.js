@@ -1211,15 +1211,10 @@ describe('useAppShellPanelBuilders chat bridge', () => {
       characterId: 'char_a',
       runKind: 'manual'
     })
-    expect(ctx.chatStore.queuePendingPersistedMessage).toHaveBeenCalledWith('session_a', expect.objectContaining({
-      messageKind: 'narration_debug',
-      name: '总结调试',
-      content: expect.stringContaining('【总结对话】开始写入')
-    }))
-    expect(ctx.chatStore.queuePendingPersistedMessage).toHaveBeenCalledWith('session_a', expect.objectContaining({
-      messageKind: 'narration_debug',
-      name: '总结调试',
-      content: expect.stringContaining('写入 1 个事件')
+    expect(ctx.chatStore.queuePendingPersistedMessage).not.toHaveBeenCalled()
+    expect(ctx.workspaceRuntimeStore.completeAgentTaskNotice).toHaveBeenCalledWith(expect.objectContaining({
+      message: '总结对话完成',
+      detail: expect.stringContaining('写入 1 个事件')
     }))
   })
 
@@ -1294,11 +1289,7 @@ describe('useAppShellPanelBuilders chat bridge', () => {
     bridge.chatActions.openChatSummary()
     await flushAsyncTurns(12)
 
-    expect(ctx.chatStore.queuePendingPersistedMessage).toHaveBeenCalledWith('session_a', expect.objectContaining({
-      messageKind: 'narration_debug',
-      name: '总结调试',
-      content: expect.stringContaining('【总结对话】完成但有失败角色')
-    }))
+    expect(ctx.chatStore.queuePendingPersistedMessage).not.toHaveBeenCalled()
     expect(ctx.workspaceRuntimeStore.failAgentTaskNotice).toHaveBeenCalledWith(expect.objectContaining({
       message: '总结对话写轨迹部分失败'
     }))

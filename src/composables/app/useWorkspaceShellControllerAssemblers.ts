@@ -69,7 +69,6 @@ export function buildWorkspaceShellFlowHubArgs(parts: WorkspaceShellAssemblerPar
     workspaceKernel: parts.workspaceKernel,
     workspaceBootSession: parts.workspaceBootSession,
     workspaceRuntimeStore: parts.workspaceRuntimeStore,
-    canSeeNarrationDebug: parts.canSeeNarrationDebug,
     toast: parts.toast,
     stopTaskTimerUpdate: parts.stopTaskTimerUpdate,
     loadLocalArchiveSaves: parts.loadLocalArchiveSaves,

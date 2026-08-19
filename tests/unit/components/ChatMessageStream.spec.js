@@ -878,7 +878,7 @@ describe('ChatMessageStream', () => {
     expect(labels).toEqual(['角色 1/2', '旁白 1/1', '角色 2/2'])
   })
 
-  it('用独立文学排版显示旁白消息但不显示思考和召回入口', () => {
+  it('用无头像的独立文学排版显示旁白消息且不显示思考和召回入口', () => {
     const wrapper = mountStream({
       currentMessages: [{
         id: 45,
@@ -892,7 +892,7 @@ describe('ChatMessageStream', () => {
 
     const row = wrapper.find('.chat-message--narration')
     expect(row.exists()).toBe(true)
-    expect(row.find('.chat-avatar').text()).toContain('旁')
+    expect(row.find('.chat-avatar').exists()).toBe(false)
     expect(row.find('.chat-sender').text()).toContain('旁白')
     expect(row.find('.chat-text').text()).toContain('门外的脚步声')
     expect(row.text()).not.toContain('内部规划')
@@ -960,7 +960,7 @@ describe('ChatMessageStream', () => {
     expect(row.find('.chat-typing').exists()).toBe(false)
   })
 
-  it('调试消息独立于旁白显示，只保留同行提示词入口并隐藏元信息', async () => {
+  it('历史 narration_debug 兼容记录不再进入聊天消息流', () => {
     const wrapper = mountStream({
       currentMessages: [{
         id: 46,
@@ -976,24 +976,9 @@ describe('ChatMessageStream', () => {
       }]
     })
 
-    wrapper.find('.chat-debug-group__summary').trigger('click')
-    await wrapper.vm.$nextTick()
-    const row = wrapper.find('.chat-message--narration-debug')
-    expect(row.exists()).toBe(true)
-    expect(row.classes()).not.toContain('chat-message--narration')
-    expect(wrapper.find('.chat-debug-group__title').text()).toContain('调试信息')
-    expect(row.find('.chat-sender').exists()).toBe(false)
-    expect(row.find('.chat-text').text()).toContain('【用户输入环境】快判：是')
-    expect(row.find('.chat-time').exists()).toBe(false)
-    expect(row.text()).not.toContain('12:04')
-    expect(row.text()).not.toContain('deepseek-v4-flash')
-    expect(row.text()).not.toContain('维斯珂 / 博瑞利尔 / 修道院')
-    expect(row.find('[data-prompt-message-id="46"]').exists()).toBe(true)
-    expect(row.find('.chat-bubble').element.compareDocumentPosition(row.find('.msg-actions').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(row.find('[data-recall-message-id="46"]').exists()).toBe(false)
-    expect(row.find('[title="编辑"]').exists()).toBe(false)
-    expect(row.find('[title="重试召回"]').exists()).toBe(false)
-    expect(row.find('[title="按原提示词重试"]').exists()).toBe(false)
+    expect(wrapper.find('.chat-debug-group').exists()).toBe(false)
+    expect(wrapper.find('.chat-message--narration-debug').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('用户输入环境')
   })
 
   it('角色消息和正式旁白底部显示完整帷幕时间、地点天气和模型', () => {
@@ -1106,30 +1091,6 @@ describe('ChatMessageStream', () => {
     expect(wrapper.find('[title="重试召回"]').exists()).toBe(false)
     expect(wrapper.find('[title="重新运行 CAPS"]').exists()).toBe(false)
     expect(wrapper.find('[title="按提示词重试"]').exists()).toBe(true)
-  })
-
-  it('调试消息使用统一中括号前缀并让后续行对齐正文列', async () => {
-    const wrapper = mountStream({
-      currentMessages: [{
-        id: 48,
-        role: 'assistant',
-        messageKind: 'narration_debug',
-        name: '总结调试',
-        content: '【总结对话】成功：已写入角色轨迹。\n本次消耗 14,709 tokens（输入 9,602，输出 5,107）',
-        time: '12:06'
-      }]
-    })
-
-    await wrapper.find('.chat-debug-group__summary').trigger('click')
-    const row = wrapper.find('.chat-message--narration-debug')
-    const prefix = row.find('.debug-prefix')
-    const body = row.find('.debug-body')
-    expect(prefix.exists()).toBe(true)
-    expect(prefix.text()).toBe('【总结对话】')
-    expect(body.exists()).toBe(true)
-    expect(body.text()).toContain('成功：已写入角色轨迹。')
-    expect(body.text()).toContain('本次消耗 14,709 tokens')
-    expect(row.find('.debug-line').exists()).toBe(true)
   })
 
   // ---- 子批5：提调真·导演 loop 轮级流式载体（2026-07-04 位置改造：收进顶部提调坞 TidiaoDirectorDock）----

@@ -155,7 +155,8 @@ export interface AgentRuntimeProgressEvent {
 }
 
 /** 运行时保真事件（统一 state 协议 R3-2 · append log 源）：loop 内 assistant 消息/工具调用/工具结果
- *  一产生即上抛**原始对象**（不截断、不折叠），供外层 append 进保真 log（永不真删、可检索）。
+ *  一产生即上抛**原始对象**（不截断、不折叠），供外层 append 进保真 log（永不真删、可检索）；语义压缩与
+ *  journal 持久化失败也走同一事件出口，但只供运行时审计，消费方必须按 kind 显式分型，不能兜底当作工具结果。
  *  与 {@link AgentRuntimeProgressEvent}（UI 过程轨摘要）分离：onProgress 给视图、onEvent 给保真源。
  *  运行时只上抛 runtime 原生类型（ToolCallMessage/ToolResultMessage），不认 append log 形态（边界单向）。 */
 export type AgentRuntimeFidelityEvent =

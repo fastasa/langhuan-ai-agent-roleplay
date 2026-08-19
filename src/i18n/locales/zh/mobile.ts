@@ -284,6 +284,6 @@ export const mobile = {
     tempCharacter: '临时角色',
     formalCharacter: '正式角色',
     tdsPlaceholderResume: '回复提调，续跑本轮',
-    tdsPlaceholderDefault: '提调纠偏：想改方向直接说；带「角色2」可按楼层精修'
+    tdsPlaceholderDefault: '给提调发消息：提问或修改要求都可直接说；带「角色2」可按楼层精修'
   }
 }

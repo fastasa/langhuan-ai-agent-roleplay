@@ -48,9 +48,9 @@ describe('TidiaoPrecisionEditBar（输入栏上方常驻提调纠偏浮条）', 
     expect(wrapper.emitted('submit')).toBeFalsy()
   })
 
-  it('D6：缺省占位为单聊文案、传 placeholder（群聊楼层提示）时用传入文案', () => {
+  it('缺省占位明确输入即与提调 Agent 对话，传 placeholder 时用父级文案', () => {
     const single = mount(TidiaoPrecisionEditBar)
-    expect(single.find('textarea').attributes('placeholder')).toBe('输入消息，让提调修改聊天')
+    expect(single.find('textarea').attributes('placeholder')).toBe('给提调发消息；提问或修改要求都可以直接说')
     const group = mount(TidiaoPrecisionEditBar, {
       props: { placeholder: '提调修改群聊：带「角色2」按楼层精修指定角色，或直接说改方向纠偏' }
     })
