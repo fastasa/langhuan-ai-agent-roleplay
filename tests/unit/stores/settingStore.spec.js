@@ -195,7 +195,7 @@ describe('settingStore prompt presets', () => {
     expect(preset.content).toBe('{chat_history}')
   })
 
-  it('装载整理只补齐仍公开可编辑的内置提示词', async () => {
+  it('已有资料库装载时只补必装占位，不复活用户删掉的可选默认项', async () => {
     const store = useSettingStore()
     const fetchMock = vi.mocked(fetch)
     store.promptPresets = [{
@@ -211,18 +211,14 @@ describe('settingStore prompt presets', () => {
 
     await store.ensureBuiltinPromptPresets()
 
-    const currentUserInputPreset = store.promptPresets.find((item) => item.id === 'current_user_input_placeholder')
-    expect(currentUserInputPreset).toEqual(expect.objectContaining({
-      name: '本轮用户输入（占位）',
-      role: 'placeholder',
-      scene: 'chat',
-      enabled: true
-    }))
+    expect(store.promptPresets.find((item) => item.id === 'current_user_input_placeholder')).toBeUndefined()
+    expect(store.promptPresets.find((item) => item.id === 'user_status')).toBeUndefined()
+    expect(store.promptPresets.find((item) => item.id === 'character_brain_recall')).toBeUndefined()
     const currentUserInputWrite = fetchMock.mock.calls.find(([, options]) => {
       const body = JSON.parse(String(options?.body || '{}'))
       return body.id === 'current_user_input_placeholder'
     })
-    expect(currentUserInputWrite).toBeTruthy()
+    expect(currentUserInputWrite).toBeUndefined()
   })
 
   it('手动重置默认提示词时包含可排序编辑的本轮用户输入占位条目', async () => {
@@ -347,7 +343,9 @@ describe('settingStore prompt presets', () => {
       'big_summary',
       'trajectory_markdown_authoring',
       'recall_context_compression',
-      'recall_round_judgment'
+      'recall_round_judgment',
+      'user_status',
+      'character_brain_recall'
     ]
 
     removedIds.forEach((id) => {
@@ -422,26 +420,36 @@ describe('settingStore prompt presets', () => {
     expect(deletedIds).toEqual([])
   })
 
-  it('内置提示词装载时保留服务端数字停用状态', async () => {
+  it('自定义文风删掉后不会因装载整理凭名称复活', async () => {
     const store = useSettingStore()
-    store.promptPresets = [{
-      id: 'character_brain_recall',
-      name: '角色大脑轻量召回',
-      content: '{character_brain_recall}',
-      role: 'system',
-      scene: 'chat',
-      frequency: 'always',
-      enabled: 0,
-      orderIndex: 98,
-      promptGroup: 'recall',
-      usageMode: 'manual',
-      isRequired: 0,
-      scope: 'general'
-    }]
+    store.promptPresets = [
+      {
+        id: 'chat_history_placeholder',
+        name: '聊天记录（占位）',
+        content: '{chat_history}',
+        role: 'placeholder',
+        scene: 'chat',
+        frequency: 'always',
+        enabled: true,
+        orderIndex: 7
+      },
+      {
+        id: 'custom_preset_style',
+        name: '文风',
+        content: '清亮克制',
+        role: 'system',
+        scene: 'chat',
+        frequency: 'always',
+        enabled: true,
+        orderIndex: 8
+      }
+    ]
 
+    await store.deletePromptPreset('custom_preset_style')
     await store.ensureBuiltinPromptPresets()
 
-    expect(store.promptPresets.find((preset) => preset.id === 'character_brain_recall')?.enabled).toBe(false)
+    expect(store.promptPresets.find((preset) => preset.name === '文风')).toBeUndefined()
+    expect(store.promptPresets.some((preset) => preset.id.startsWith('custom_preset_'))).toBe(false)
   })
 
   it('导入提示词预设时保留必装与用途元数据', async () => {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "一键开玩世界"
+  short_description: "一句话生成完整文档、角色、世界、会话、剧本种子与头像"
+  default_prompt: "Use $playable-world-builder to build a complete playable world from one request."

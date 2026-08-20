@@ -18,6 +18,7 @@ export interface ManualNarrationCommandInput {
   now?: string
   narrationKind?: BuiltinNarrationKind
   narrationProfileId?: string
+  scenarioMountedPromptText?: string
 }
 
 export interface ManualNarrationCommandResult extends NarrationChatWriteResult {
@@ -149,6 +150,7 @@ export async function runManualNarrationCommand(input: ManualNarrationCommandInp
     abortSignal: input.abortSignal,
     now: input.now,
     narrationProfile,
+    scenarioMountedPromptText: input.scenarioMountedPromptText,
     roleAppearanceProfiles: input.roleAppearanceProfiles
   })
   return {
@@ -173,6 +175,7 @@ export async function runUserNarrationCommand(input: UserNarrationCommandInput):
     now: input.now,
     skipCandidateArchive: true,
     narrationProfile: readSessionNarrationProfile({ session: input.session, kind: input.roleProfile ? 'appearance' : 'event_push' }),
+    scenarioMountedPromptText: input.scenarioMountedPromptText,
     roleAppearanceProfiles: input.roleAppearanceProfiles,
     userNarrationPatch: {
       mode: input.command.mode === 'agent_supplement' ? 'agent_supplement' : 'direct',

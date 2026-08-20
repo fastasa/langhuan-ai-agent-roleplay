@@ -16,8 +16,11 @@ export const XINGYI_SLASH_COMMANDS: XingyiSlashCommand[] = [
   { name: 'model', usage: '/model', descriptionKey: 'xingyi.slash.modelDesc' },
   // 立即生成今天日记从设置面板挪到斜杠命令。
   // 本表纯命令列表不感知权限，权限过滤在 XingyiDock.vue 的 slashCommands computed 里做（见该文件）。
-  { name: 'diary', usage: '/diary', descriptionKey: 'xingyi.slash.diaryDesc' }
+  { name: 'diary', usage: '/diary', descriptionKey: 'xingyi.slash.diaryDesc' },
+  { name: 'build-world', usage: '/build-world <需求>', descriptionKey: 'xingyi.slash.buildWorldDesc' }
 ]
+
+export const PLAYABLE_WORLD_SLASH_COMMAND_NAME = 'build-world'
 
 export const AGENT_MODEL_SLASH_COMMAND = XINGYI_SLASH_COMMANDS.find(
   (command) => command.name === 'model'
@@ -33,6 +36,12 @@ export function parseSlashQuery(draft: string): string | null {
   const rest = text.slice(1)
   if (/\s/.test(rest)) return null
   return rest.toLowerCase()
+}
+
+/** 解析真正送出的 /build-world 指令；null 表示不是该命令，空串表示尚未填写需求。 */
+export function parsePlayableWorldSlashCommand(input: string): string | null {
+  const match = String(input ?? '').match(/^\/build-world(?:\s+([\s\S]*))?$/i)
+  return match ? String(match[1] || '').trim() : null
 }
 
 /** 子串匹配过滤命令（如输入 c 命中 clear）；查询为空返回全部。 */

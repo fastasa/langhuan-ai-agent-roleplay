@@ -29,7 +29,6 @@ import {
 import {
   CHAT_HISTORY_PLACEHOLDER,
   CHARACTER_ARRANGEMENT_RECALL_PLACEHOLDER,
-  CHARACTER_BRAIN_RECALL_PLACEHOLDER,
   CHARACTER_EXPRESSION_RECALL_PLACEHOLDER,
   CHARACTER_GENERAL_RECALL_PLACEHOLDER,
   CHARACTER_PROFILE_RECALL_PLACEHOLDER,
@@ -116,11 +115,9 @@ export const useSettingStore = defineStore('setting', () => {
   const builtinPromptPresetIds = [
     'user_custom',
     'current_status',
-    'user_status',
     'chat_constraint',
     SCENARIO_MOUNTED_PROMPTS_PLACEHOLDER_PRESET_ID,
     'chat_history_placeholder',
-    'character_brain_recall',
     'character_profile_recall',
     'character_general_recall',
     'character_arrangement_recall',
@@ -141,7 +138,9 @@ export const useSettingStore = defineStore('setting', () => {
     'big_summary',
     'trajectory_markdown_authoring',
     'recall_context_compression',
-    'recall_round_judgment'
+    'recall_round_judgment',
+    'user_status',
+    'character_brain_recall'
   ] as const
 
   type WeatherDetail = {
@@ -213,13 +212,12 @@ export const useSettingStore = defineStore('setting', () => {
   }
 
   function inferPromptPresetRequired(preset: Partial<PromptPreset>): boolean {
-    if (preset.id === 'user_status') return false
     const explicit = preset.isRequired as unknown
     if (explicit === true || explicit === 1 || explicit === '1' || explicit === 'true') return true
     if (explicit === false || explicit === 0 || explicit === '0' || explicit === 'false') return false
     if (preset.promptGroup === 'recall') return false
     const content = String(preset.content || '')
-    if (content.trim() === CHARACTER_BRAIN_RECALL_PLACEHOLDER) return false
+    if (content.trim() === '{character_brain_recall}') return false
     if (content.includes('{task_system_context}') || content.includes('{event_stack_recent_context}')) return false
     return (preset.usageMode || 'always') === 'always'
   }
@@ -338,7 +336,6 @@ $伸手抹去脸上的灰尘$，（神仙保佑，今天可千万别再碰到那
         summary: '命中情境后，在这里插入该情境下的挂载提示词原文'
       },
       { id: 'current_status', name: '当前状态', role: 'system', content: CURRENT_STATUS_PROMPT_TEMPLATE, enabled: true, scene: 'all', frequency: 0, orderIndex: 5 },
-      { id: 'user_status', name: '用户状态', role: 'system', content: '用户名：{user_name}\n{user_desc}\n点数：{points}点\n金钱：¥{money}\n票据概况：{tickets_brief}', enabled: false, scene: 'all', frequency: 0, orderIndex: 6, usageMode: 'manual', isRequired: false, promptGroup: 'scene', scope: 'general' },
       {
         id: 'chat_history_placeholder',
         name: '聊天记录（占位）',
@@ -348,20 +345,6 @@ $伸手抹去脸上的灰尘$，（神仙保佑，今天可千万别再碰到那
         scene: 'chat',
         frequency: 0,
         orderIndex: 8
-      },
-      {
-        id: 'character_brain_recall',
-        name: '角色大脑轻量召回',
-        role: 'system',
-        content: CHARACTER_BRAIN_RECALL_PLACEHOLDER,
-        enabled: false,
-        scene: 'chat',
-        frequency: 0,
-        orderIndex: 9,
-        promptGroup: 'recall',
-        usageMode: 'manual',
-        isRequired: false,
-        scope: 'general'
       },
       {
         id: 'character_profile_recall',
@@ -449,8 +432,12 @@ $伸手抹去脸上的灰尘$，（神仙保佑，今天可千万别再碰到那
   async function ensureBuiltinPromptPresets(): Promise<void> {
     const currentById = new Map((promptPresets.value || []).map((preset) => [preset.id, preset]))
     const builtinPromptPresets = getBuiltinPromptPresets()
+    const isInitialSeed = currentById.size === 0
     const missingBuiltinPresets = builtinPromptPresets
       .filter((preset) => !currentById.has(preset.id))
+      // 只有全新资料库才播种整套默认值。已有资料库只修复真正必装的公共占位，
+      // 否则用户明确删除的可选内置项会在刷新/重启后被重新创建。
+      .filter((preset) => isInitialSeed || preset.id === SCENARIO_MOUNTED_PROMPTS_PLACEHOLDER_PRESET_ID)
       .map((preset) => sanitizePromptPresetInput(preset))
 
     const upgradedBuiltinPresets = builtinPromptPresets

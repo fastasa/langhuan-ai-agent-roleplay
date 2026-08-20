@@ -85,7 +85,13 @@ import { createXingyiDispatchResearchTool, type XingyiResearchDispatchContext } 
 import { createXingyiImageGenerationTools, type XingyiImageGenerationContext } from './xingyiImageGenerationTool'
 import { createXingyiWebSearchTool, type XingyiWebSearchContext } from './xingyiWebSearchTool'
 import { createReadXingyiDocLibraryEditingSkillTool } from './xingyiDocLibraryEditingSkill'
+import { createReadXingyiPlayableWorldBuilderSkillTool } from './xingyiPlayableWorldBuilderSkill'
 import { createReadXingyiRelationHintSkillTool } from './xingyiRelationHintSkill'
+import {
+  createBuildPlayableWorldTool,
+  createReadPlayableWorldBuildReceiptTool,
+  type XingyiPlayableWorldBuilderProvider
+} from './xingyiPlayableWorldBuilder'
 import {
   createXingyiConversationAvatarTools,
   type XingyiReadableAvatarImage,
@@ -180,6 +186,8 @@ export interface RunXingyiAgentInput {
   characterGroups?: XingyiCharacterGroupProvider
   /** 多角色并行生成接缝：每条链路独立生成并正式落库，不经过角色编辑弹窗共享表单。 */
   batchCharacters?: XingyiBatchCharacterProvider
+  /** 一句话开玩世界编排接缝：原子能力均指向现役文档/角色/世界/会话/在场/种子/图片正式真值。 */
+  playableWorldBuilder?: XingyiPlayableWorldBuilderProvider
   /** 显式会话解析器（取料闭环计划批次3·浮坞注入）：把 session 参数（会话名/联系人名/targetId/sessionId）
    *  解析成完整上下文，让状态系统/读投影工具能操作非活动会话。缺省=不接入（给了 session 会如实报未接入）。 */
   resolveSessionContext?: XingyiSessionResolver
@@ -304,6 +312,9 @@ export async function runXingyiAgent(input: RunXingyiAgentInput): Promise<RunXin
   const retrievalContext = input.retrievalContext ?? createTidiaoDocLibraryRetrievalContext({})
   const generatedAttachments: ChatImageAttachment[] = []
   const pendingAvatarViews: XingyiReadableAvatarImage[] = []
+  let hasReadPlayableWorldBuilderSkill = Boolean(input.skillActivations?.some((activation) => (
+    activation.skillId === 'xingyi.playable-world-builder'
+  )))
   let hasReadRelationHintSkill = false
   const relationHintSkillAccess = {
     hasRead: () => hasReadRelationHintSkill,
@@ -319,6 +330,9 @@ export async function runXingyiAgent(input: RunXingyiAgentInput): Promise<RunXin
     createFetchUnitDetailTool({ retrievalContext }),
     ...createXingyiKnowledgeTools(),
     createReadXingyiDocLibraryEditingSkillTool(),
+    createReadXingyiPlayableWorldBuilderSkillTool({
+      markRead: () => { hasReadPlayableWorldBuilderSkill = true }
+    }),
     createReadXingyiRelationHintSkillTool(relationHintSkillAccess),
     ...createXingyiFunctionTools({
       ...(input.confirmWrite ? { confirmWrite: input.confirmWrite } : {}),
@@ -346,6 +360,15 @@ export async function runXingyiAgent(input: RunXingyiAgentInput): Promise<RunXin
       provider: input.batchCharacters,
       ...(input.confirmWrite ? { confirmWrite: input.confirmWrite } : {})
     }) : []),
+    ...(input.playableWorldBuilder ? [
+      createReadPlayableWorldBuildReceiptTool(input.playableWorldBuilder),
+      createBuildPlayableWorldTool({
+        provider: input.playableWorldBuilder,
+        hasReadSkill: () => hasReadPlayableWorldBuilderSkill,
+        onGenerated: (attachment) => { generatedAttachments.push(attachment) },
+        ...(input.confirmWrite ? { confirmWrite: input.confirmWrite } : {})
+      })
+    ] : []),
     // 询问用户做选择（内核统一批·批C）：始终装配——让模型知道"拿不准可以问用户"；askUser 通道缺省缺失时执行期如实报不可用。
     ...createXingyiAskUserTools({ ...(input.askUser ? { askUser: input.askUser } : {}) }),
     ...(input.imageGeneration

@@ -34,6 +34,7 @@ const DB_PATH = process.env.LANGHUAN_DB_PATH
   : join(DATA_DIR, 'langhuan.db')
 const CURRENT_STATUS_PROMPT_TEMPLATE = '当前时间：{time}\n{location}\n{weather}'
 const PROMPT_PRESET_ASSEMBLY_MIGRATION_KEY = 'migration:prompt_presets:assembly_cleanup_20260508_v1'
+const RETIRE_OBSOLETE_PROMPT_PRESETS_MIGRATION_KEY = 'migration:prompt_presets:retire_user_status_and_brain_recall_20260820_v1'
 const USER_API_KEY_ENCRYPTION_MIGRATION_KEY = 'migration:api_presets:encrypt_plain_keys_20260511_v1'
 const RETIRE_CHAT_EVENT_POOL_TABLE_MIGRATION_KEY = 'migration:chat_event_pool_batches:retire_20260608_v1'
 const RETIRED_PROMPT_PRESET_IDS = [
@@ -50,6 +51,7 @@ const RETIRED_PROMPT_PRESET_IDS = [
   'recall_context_compression',
   'recall_round_judgment'
 ]
+const OBSOLETE_PROMPT_PRESET_IDS = ['user_status', 'character_brain_recall'] as const
 
 type SqlParam = unknown
 type SqlRow = Record<string, unknown>
@@ -2534,6 +2536,15 @@ function migrateCurrentStatusPromptPresetContent() {
   markSystemMigrationRun(PROMPT_PRESET_ASSEMBLY_MIGRATION_KEY)
 }
 
+function retireObsoletePromptPresets() {
+  if (!tableExists('prompt_presets')) return
+  if (hasSystemMigrationRun(RETIRE_OBSOLETE_PROMPT_PRESETS_MIGRATION_KEY)) return
+  for (const id of OBSOLETE_PROMPT_PRESET_IDS) {
+    db.prepare('/* unscoped */ DELETE FROM prompt_presets WHERE id = ?').run(id)
+  }
+  markSystemMigrationRun(RETIRE_OBSOLETE_PROMPT_PRESETS_MIGRATION_KEY)
+}
+
 function hasSystemMigrationRun(key: string) {
   if (!tableExists('config')) return false
   const row = db.prepare(`
@@ -2759,6 +2770,7 @@ migrateConfigScopedIdentity()
 migrateApiPresetsScopedIdentity()
 migratePromptPresetsScopedIdentity()
 migrateCurrentStatusPromptPresetContent()
+retireObsoletePromptPresets()
 retireChatEventPoolTable()
 ensureColumn('tickets', 'auto_consume_next', 'INTEGER DEFAULT 0')
 ensureColumn('event_stack', 'real_location', "TEXT DEFAULT ''")

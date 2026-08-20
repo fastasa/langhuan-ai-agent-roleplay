@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 const ROOT = process.cwd()
 
 const APPROVED_UNSCOPED_SQL_COUNTS = {
-  'server/db.ts': 17,
+  'server/db.ts': 18,
   'server/repositories/characterRepository.ts': 6,
   'server/repositories/chatRepository.ts': 54,
   'server/repositories/docLibraryRepository.ts': 3,

@@ -1,13 +1,42 @@
-import { describe, expect, it } from 'vitest'
-import db from '../../../server/db.js'
-import { withDataScope } from '../../../server/localWorkspace.js'
-import { createChatRepository } from '../../../server/repositories/chatRepository.js'
-import { createNarrativeSeedAppService } from '../../../server/application/world/narrativeSeedAppService.js'
-import { readChatSnapshotPartition } from '../../../server/repositories/workspaceSnapshot/readChats.js'
-import { applyChatSnapshotPartition } from '../../../server/repositories/workspaceSnapshot/restoreChats.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 describe('世界叙事种子工作区快照', () => {
-  it('完整导出并恢复配置、种子、参与者与事件账本', () => {
+  let testDirectory = ''
+
+  afterEach(() => {
+    vi.resetModules()
+    vi.unstubAllEnvs()
+    if (!testDirectory) return
+    const resolvedDirectory = resolve(testDirectory)
+    const resolvedTempRoot = resolve(tmpdir())
+    if (resolvedDirectory.startsWith(`${resolvedTempRoot}\\`) || resolvedDirectory.startsWith(`${resolvedTempRoot}/`)) {
+      rmSync(resolvedDirectory, { recursive: true, force: true })
+    }
+    testDirectory = ''
+  })
+
+  it('完整导出并恢复配置、种子、参与者与事件账本', async () => {
+    testDirectory = mkdtempSync(join(tmpdir(), 'langhuan-narrative-snapshot-'))
+    vi.stubEnv('LANGHUAN_DB_PATH', join(testDirectory, 'snapshot.db'))
+    vi.stubEnv('LANGHUAN_DB_AUTO_SAVE_INTERVAL', '0')
+    const [
+      { default: db },
+      { withDataScope },
+      { createChatRepository },
+      { createNarrativeSeedAppService },
+      { readChatSnapshotPartition },
+      { applyChatSnapshotPartition }
+    ] = await Promise.all([
+      import('../../../server/db.js'),
+      import('../../../server/localWorkspace.js'),
+      import('../../../server/repositories/chatRepository.js'),
+      import('../../../server/application/world/narrativeSeedAppService.js'),
+      import('../../../server/repositories/workspaceSnapshot/readChats.js'),
+      import('../../../server/repositories/workspaceSnapshot/restoreChats.js')
+    ])
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`
     const userId = `narrative_snapshot_${suffix}`
     withDataScope({ userId, role: 'user', workspaceId: 'default' }, () => {
@@ -54,5 +83,5 @@ describe('世界叙事种子工作区快照', () => {
       expect(restored.data.events).toHaveLength(1)
       expect(service.getConfig(worldId).data.content).toBe('承诺与代价')
     })
-  })
+  }, 20_000)
 })

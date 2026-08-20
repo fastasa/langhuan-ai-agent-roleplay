@@ -168,6 +168,7 @@ import {
   type TidiaoDirectorCarryOver
 } from '../../app/tidiaoDirectorStreamState'
 import { loadEffectiveOrchestratorConfig } from '../../repositories/orchestratorConfigRepository'
+import { buildScenarioMountedPromptText, loadScenarioMountedPromptTextForSession } from '../../app/scenarioMountedPromptText'
 import type { TidiaoRetrievalContext } from '../../app/tidiaoRetrievalTools'
 // 批次3·3b 轮级资料池：池结构/隔离读接口 + 会话级缓存（localStorage·不进主库）。
 import { createEmptyRoundRecallPools, appendCharacterPoolCards, appendWorldPoolCards, getDirectorVisiblePools, getCharacterPoolCards, getWorldPoolCards, reconcileWorldPoolDocumentScope, renderDirectorVisiblePoolsBlock, type RecallPoolCard, type RoundRecallPools } from '../../app/recallRoundPool'
@@ -1131,6 +1132,8 @@ export function useChatSendPipeline({
     // after_speaker/round_end 子集进 narrationInterleavedPending，锚点角色消息落库后由 flushRoundInterleavedNarration
     // 按段生成（生成时能看到该角色实际说了什么）；completions 收集各段生成 promise，轮末统一收束。
     narrationCalls: PersonalityNarrationCall[]
+    /** 提调本轮已命中情境的挂载提示词，供本轮全部旁白分段复用。 */
+    scenarioMountedPromptText: string
     narrationStarted: boolean
     narrationInterleavedPending: PersonalityNarrationCall[]
     narrationInterleavedCompletions: Promise<unknown>[]
@@ -3784,6 +3787,7 @@ export function useChatSendPipeline({
           speakerName: input.speakerName,
           calls: roundStartNarrationCalls,
           profiles: roundNarrationProfiles,
+          scenarioMountedPromptText: activeRoundDirector.scenarioMountedPromptText,
           projectionFactByMessageId: buildNarrationProjectionFactMap(projectionContext.projectionItems),
           insertAfterMessageId: activePipelineInputMessageId || undefined,
           onMessageWritten: (messageId) => {
@@ -4277,30 +4281,6 @@ export function useChatSendPipeline({
     return String(preset.content || '').trim()
   }
 
-  function buildScenarioMountedPromptText(
-    config: ReplyPlanOrchestratorConfig | null | undefined,
-    scenarioCode: string
-  ): string {
-    const code = normalizeReplyPlanScenarioCode(scenarioCode)
-    if (!code) return ''
-    const scenario = (Array.isArray(config?.scenarios) ? config?.scenarios : [])
-      .find((item) => normalizeReplyPlanScenarioCode(item?.code) === code)
-    const prompts = Array.isArray(scenario?.mountedPrompts) ? scenario.mountedPrompts : []
-    return prompts
-      .map((prompt, index) => {
-        const orderIndex = Number(prompt?.orderIndex)
-        return {
-          content: String(prompt?.content || '').trim(),
-          enabled: prompt?.enabled !== false,
-          orderIndex: Number.isFinite(orderIndex) ? orderIndex : 2.1 + index / 100
-        }
-      })
-      .filter((prompt) => prompt.enabled && prompt.content)
-      .sort((left, right) => left.orderIndex - right.orderIndex)
-      .map((prompt) => prompt.content)
-      .join('\n\n')
-  }
-
   function readMessageTextField(message: Record<string, unknown> | null | undefined, camel: string, snake: string) {
     return String(message?.[camel] ?? message?.[snake] ?? '').trim()
   }
@@ -4446,6 +4426,7 @@ export function useChatSendPipeline({
     messages: Array<Record<string, unknown>>
     continuityMessages: Array<Record<string, unknown>>
     projectionFactByMessageId?: Map<number, string>
+    scenarioMountedPromptText?: string
     insertAfterMessageId?: number
     onMessageWritten?: (messageId: number) => void
     abortSignal?: AbortSignal
@@ -4505,6 +4486,7 @@ export function useChatSendPipeline({
       callAI: callAI as any,
       now: new Date().toISOString(),
       narrationProfile: input.profile,
+      scenarioMountedPromptText: input.scenarioMountedPromptText,
       agentAuthoredPrompt: {
         profileIds: callProfileIds,
         profileNames: callProfileNames,
@@ -4568,6 +4550,7 @@ export function useChatSendPipeline({
     editedPrompt: string
     speakerName: string
     profiles: NarrationProfile[]
+    scenarioMountedPromptText?: string
     abortSignal?: AbortSignal
   }): Promise<{ content: string; promptTrace?: { finalPrompt: string; promptBlocks?: ChatPromptLogBlock[] } }> {
     const session = getChatStoreCurrentSession(chatStore) as any
@@ -4603,6 +4586,7 @@ export function useChatSendPipeline({
       callAI: callAI as any,
       now: new Date().toISOString(),
       narrationProfile: profile,
+      scenarioMountedPromptText: input.scenarioMountedPromptText,
       // 改后的旁白提示词即「写什么」的唯一来源（与新增旁白(c) 的 generatedPrompt 同口径）。
       agentAuthoredPrompt: { profileIds: [profile.id], profileNames: [profile.name], content: input.editedPrompt },
       roleAppearanceProfiles: narrationKind === 'appearance' ? await buildCurrentNarrationRoleAppearanceProfiles(input.sessionId) : [],
@@ -4627,6 +4611,7 @@ export function useChatSendPipeline({
     calls: PersonalityNarrationCall[]
     profiles: NarrationProfile[]
     projectionFactByMessageId?: Map<number, string>
+    scenarioMountedPromptText?: string
     insertAfterMessageId?: number
     onMessageWritten?: (messageId: number) => void
     onOutcome?: (outcome: ReplyWorkflowNarrationOutcome) => void
@@ -4723,6 +4708,7 @@ export function useChatSendPipeline({
             messages,
             continuityMessages,
             projectionFactByMessageId: input.projectionFactByMessageId,
+            scenarioMountedPromptText: input.scenarioMountedPromptText,
             insertAfterMessageId: input.insertAfterMessageId,
             // 落库前：① 等前序槽位落库完成（生成本身不受影响，仍与其它条并行发起）；② 穿插预生成场景下
             // 还要等锚点角色真实落库拿到 id（awaitAnchor resolve 真实 id 时覆盖锚点；resolve(undefined) 时
@@ -4870,6 +4856,7 @@ export function useChatSendPipeline({
       speakerName: '',
       calls: matched,
       profiles: roundNarrationProfiles,
+      scenarioMountedPromptText: director.scenarioMountedPromptText,
       messagesOverride: liveMessages,
       insertAfterMessageId: input.fallbackInsertAfterMessageId,
       awaitAnchor: () => anchorPromise,
@@ -4930,6 +4917,7 @@ export function useChatSendPipeline({
       speakerName: '',
       calls: matched,
       profiles: roundNarrationProfiles,
+      scenarioMountedPromptText: director.scenarioMountedPromptText,
       insertAfterMessageId: input.insertAfterMessageId > 0 ? input.insertAfterMessageId : undefined,
       abortSignal: input.abortSignal
     })
@@ -5026,6 +5014,7 @@ export function useChatSendPipeline({
       setCurrentMessageModel(chatStore, '')
       streamingText.value = ''
       const roleProfile = await resolveUserNarrationRoleProfileForCommand(sessionId, targetId, command)
+      const scenarioMountedPromptText = await loadScenarioMountedPromptTextForSession(sessionId)
       updateSlashCommandNotice(runtimeStore, noticeId, {
         message: command.mode === 'agent_supplement' ? '正在调用 Agent 润色旁白' : '正在写入旁白',
         step: command.mode === 'agent_supplement' ? 'Agent 润色中' : '写入旁白消息'
@@ -5046,7 +5035,8 @@ export function useChatSendPipeline({
         callAI: callAI as any,
         abortSignal: narrationPolishTaskRun.controller?.signal,
         now: new Date().toISOString(),
-        roleProfile
+        roleProfile,
+        scenarioMountedPromptText
       })
       if (narrationPolishTaskRun.id && !isChatTaskRunActive(narrationPolishTaskRun.id)) {
         throw createAbortError()
@@ -6682,6 +6672,7 @@ export function useChatSendPipeline({
             speakerName: '',
             calls: roundStartNarrationCalls,
             profiles: roundNarrationProfiles,
+            scenarioMountedPromptText: director.scenarioMountedPromptText,
             insertAfterMessageId: sharedLastPersistedMessageId || anchorMessageId || undefined,
             onMessageWritten: (messageId) => {
               if (messageId > 0) sharedLastPersistedMessageId = messageId
@@ -7339,6 +7330,10 @@ export function useChatSendPipeline({
           directorStream: directorStreamSnapshot,
           // F3·旁白彻底归提调：提调 loop 收集的轮级旁白调用下发到管线，首发言者一次性据此生成旁白正文（want=false 时为空、真无旁白）。
           narrationCalls: Array.isArray(directorNarrationCalls) ? directorNarrationCalls : [],
+          scenarioMountedPromptText: buildScenarioMountedPromptText(
+            directorOrchestratorConfig,
+            String(script.scenarioCode || '')
+          ),
           narrationStarted: false,
           // 旁白穿插：after_speaker/round_end 锚点子集进穿插待生成队列（round_start 子集仍走首发言者一次性起跑）。
           narrationInterleavedPending: (Array.isArray(directorNarrationCalls) ? directorNarrationCalls : [])
@@ -8131,10 +8126,12 @@ export function useChatSendPipeline({
         normalizeAiOutputText(stripAiThoughtContent(String(planningOutput || '')))
       )
       completedStages.push('focused_action_plan')
+      const focusedActionScenarioMountedPromptText = await loadScenarioMountedPromptTextForSession(input.sessionId)
       const promptLibraryAssembly = await buildPersonalityPromptLibrarySystemAssembly({
         targetId: input.targetId,
         speakerTargetId: input.targetId,
-        taskRunId: input.taskRunId
+        taskRunId: input.taskRunId,
+        scenarioMountedPromptText: focusedActionScenarioMountedPromptText
       })
       const messages = buildFocusedActionFinalMessages({
         actionText: input.userText,
@@ -9901,6 +9898,7 @@ export function useChatSendPipeline({
       .map((candidate) => ({ ...candidate, direction: priorCastDirectionMap.get(candidate.characterId)! }))
 
     const agentConfig = readBrainAgentConfigFromList(settingStore.agentModelConfigs)
+    const correctionScenarioMountedPromptText = await loadScenarioMountedPromptTextForSession(sessionId)
     const regenPromptLogByMessageId = new Map<number, string>()
     // 跨轮记忆（R3-3 保真投影优先/六验重建 ON 不注入语义全在 buildTidiaoCorrectionBandMemory·装配核心单真值）。
     const bandMemory = buildTidiaoCorrectionBandMemory({
@@ -9948,6 +9946,7 @@ export function useChatSendPipeline({
             call: payload.call,
             messages: latestMessages,
             continuityMessages: latestMessages.slice(),
+            scenarioMountedPromptText: correctionScenarioMountedPromptText,
             insertAfterMessageId: Number(payload.insertAfterMessageId || 0) || anchorMessageId || undefined,
             ...(abortSignal ? { abortSignal } : {})
           })
@@ -9985,6 +9984,7 @@ export function useChatSendPipeline({
           editedPrompt,
           speakerName: request.speakerName || roundSpeakerName,
           profiles: correctionNarrationProfiles,
+          scenarioMountedPromptText: correctionScenarioMountedPromptText,
           ...(abortSignal ? { abortSignal } : {})
         })
         if (regen.promptTrace) {
@@ -10067,6 +10067,7 @@ export function useChatSendPipeline({
         call,
         messages: messageList,
         continuityMessages: messageList.slice(),
+        scenarioMountedPromptText: correctionScenarioMountedPromptText,
         insertAfterMessageId: Number(placement?.insertAfterMessageId || 0) || anchorMessageId || undefined,
         ...(abortSignal ? { abortSignal } : {})
       })

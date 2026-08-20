@@ -85,6 +85,11 @@ export const AGENT_SKILL_CATALOG = {
     description: '全局文档库寻址、枝与 index 概览、单位 CRUD、编译页和关系同步的完整操作规则。',
     bodySource: 'docs/agents/星依/skills/doc-library-editing/SKILL.md', residentBodyLayer: '0', onDemandDirectoryLayer: '1', onDemandBodyLayer: '4'
   },
+  'xingyi.playable-world-builder': {
+    id: 'xingyi.playable-world-builder', title: '星依一键开玩世界',
+    description: '从一句话连续构造文档库、主要角色、世界、群聊、全员在场、叙事种子与最后头像。',
+    bodySource: 'docs/agents/星依/skills/playable-world-builder/SKILL.md', residentBodyLayer: '0', onDemandDirectoryLayer: '1', onDemandBodyLayer: '4'
+  },
   'xingyi.relation-hint-authoring': {
     id: 'xingyi.relation-hint-authoring', title: '星依关系提示编写手册',
     description: '关系提示合法语法、谓词方向、证据边界、同名消歧、整组覆盖和复诊闭环。',
@@ -448,13 +453,15 @@ export const AGENT_SUPPLY_MANIFESTS: Readonly<Record<AgentSupplyProfileId, Agent
     skillGrants: [
       { skillId: 'xingyi.knowledge-topics', loadMode: 'on_demand', activation: ['explicit_route', 'model_tool'], failurePolicy: 'optional' },
       { skillId: 'xingyi.doc-library-editing', loadMode: 'on_demand', activation: ['explicit_route', 'model_tool'], failurePolicy: 'required' },
+      { skillId: 'xingyi.playable-world-builder', loadMode: 'on_demand', activation: ['explicit_route', 'model_tool'], failurePolicy: 'required' },
       { skillId: 'xingyi.relation-hint-authoring', loadMode: 'on_demand', activation: ['explicit_route', 'model_tool'], failurePolicy: 'required' }
     ],
     toolPolicy: {
       registrySource: 'src/app/xingyiAgentHarness.ts',
       commonTools: [
         'listXingyiKnowledgeTopics', 'searchXingyiKnowledge', 'readXingyiKnowledgeTopic',
-        'readDocLibraryEditingSkill', 'readRelationHintSkill', 'askUser',
+        'readDocLibraryEditingSkill', 'readPlayableWorldBuilderSkill', 'readRelationHintSkill',
+        'readPlayableWorldBuildReceipt', 'buildPlayableWorld', 'askUser',
         'searchWeb', 'generateImage', 'generateImagesBatch'
       ],
       deferredDiscovery: true

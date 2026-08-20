@@ -6,8 +6,12 @@ import {
 } from '../../../src/app/agentConversationModelSelection.ts'
 
 describe('Agent conversation model selection', () => {
-  it('星依和三类专业 Agent 默认都保持现役掌阁主循环', () => {
-    for (const kind of ['xingyi', 'scriptwriter', 'cartographer', 'personality_trainer']) {
+  it('编剧默认走校书，其他现役 Agent 保持掌阁主循环', () => {
+    expect(createDefaultAgentConversationModelSelection('scriptwriter')).toEqual({
+      slotId: 'balanced',
+      effort: ''
+    })
+    for (const kind of ['xingyi', 'cartographer', 'personality_trainer']) {
       expect(createDefaultAgentConversationModelSelection(kind)).toEqual({
         slotId: 'smart',
         effort: ''
@@ -19,7 +23,7 @@ describe('Agent conversation model selection', () => {
     expect(normalizeAgentConversationModelSelection({ slotId: 'balanced', effort: 'xhigh' }, 'xingyi'))
       .toEqual({ slotId: 'balanced', effort: 'xhigh' })
     expect(normalizeAgentConversationModelSelection({ slotId: 'message', effort: '危险 空格' }, 'scriptwriter'))
-      .toEqual({ slotId: 'smart', effort: '' })
+      .toEqual({ slotId: 'balanced', effort: '' })
   })
 
   it('对话选择覆盖静态任务档，并把 effort 只注入本次 Agent 主循环', () => {

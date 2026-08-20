@@ -320,9 +320,9 @@ describe('WorkspaceAgentShell', () => {
     await flushPromises()
 
     expect(wrapper.find('.agent-model-picker').exists()).toBe(true)
-    expect(wrapper.vm.controller.state.modelSelection).toEqual({ slotId: 'smart', effort: '' })
-    await input.trigger('keydown', { key: 'ArrowUp' })
     expect(wrapper.vm.controller.state.modelSelection).toEqual({ slotId: 'balanced', effort: '' })
+    await input.trigger('keydown', { key: 'ArrowUp' })
+    expect(wrapper.vm.controller.state.modelSelection).toEqual({ slotId: 'fast', effort: '' })
     await input.trigger('keydown', { key: 'Enter' })
     expect(wrapper.find('.agent-model-picker').exists()).toBe(false)
 
@@ -331,7 +331,7 @@ describe('WorkspaceAgentShell', () => {
     await flushPromises()
     expect(runner).toHaveBeenCalledWith(expect.objectContaining({
       userText: '检查这一幕',
-      modelSelection: { slotId: 'balanced', effort: '' }
+      modelSelection: { slotId: 'fast', effort: '' }
     }))
   })
 

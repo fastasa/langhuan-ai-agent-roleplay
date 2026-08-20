@@ -30,6 +30,7 @@ import {
 import { extractSessionTemporaryCharacterField } from '../../app/sessionTemporaryCharacterCommand'
 import { registerXingyiFunctionProvider } from '../../app/xingyiFunctionBridge'
 import { resolveChatSessionTitle } from '../../app/chatHeaderTitle'
+import { loadScenarioMountedPromptTextForSession } from '../../app/scenarioMountedPromptText'
 
 function readStoreRecord<T>(input: T | { value: T } | undefined): T | undefined {
   return readChatStoreValue(input)
@@ -665,6 +666,7 @@ async function triggerManualNarration(ctx: any, options: { kind?: 'environment' 
     const roleAppearanceProfiles = options.kind === 'appearance'
       ? await buildManualNarrationRoleAppearanceProfiles(ctx, sessionId)
       : []
+    const scenarioMountedPromptText = await loadScenarioMountedPromptTextForSession(sessionId)
     assertManualNarrationTaskActive(ctx, narrationGenerateTaskRun.id)
     const result = await runManualNarrationCommand({
       session: session || { id: sessionId, targetId },
@@ -675,6 +677,7 @@ async function triggerManualNarration(ctx: any, options: { kind?: 'environment' 
       abortSignal: narrationGenerateTaskRun.controller?.signal,
       narrationKind: options.kind,
       narrationProfileId: options.profileId,
+      scenarioMountedPromptText,
       roleAppearanceProfiles
     })
     assertManualNarrationTaskActive(ctx, narrationGenerateTaskRun.id)
