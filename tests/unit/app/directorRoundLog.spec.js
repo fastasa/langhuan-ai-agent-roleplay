@@ -73,6 +73,25 @@ describe('renderDirectorRoundLog', () => {
     expect(out).toBe('')
   })
 
+  it('semantic-compaction / journal-error 只供运行时审计，不冒充工具结果读取 status', () => {
+    const auditEvents = [
+      { kind: 'semantic-compaction', record: { id: 'checkpoint-1' }, turnIndex: 0 },
+      {
+        kind: 'journal-error', runId: 'run-1', seq: 2, journalEventKind: 'assistant.completed',
+        checksum: 'checksum-1', message: 'journal offline', turnIndex: 0
+      }
+    ]
+
+    expect(() => renderDirectorRoundLog(auditEvents)).not.toThrow()
+    expect(renderDirectorRoundLog(auditEvents)).toBe('')
+
+    const collector = createDirectorRoundLogCollector()
+    for (const event of auditEvents) collector.ingest(event)
+    expect(collector.hasLines()).toBe(false)
+    expect(collector.renderLog()).toBe('')
+    expect(collector.renderReadMaterials()).toBe('')
+  })
+
   // H2（共享收集器）+ 批次I（层4 生命周期：最近 3 条全文·更旧降级索引行·searchDirectorMemory 可搜回）。
   describe('createDirectorRoundLogCollector', () => {
     const feed = (collector, name, content, callId) => {

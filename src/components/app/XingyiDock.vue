@@ -412,6 +412,7 @@ import { NARRATIVE_SEED_WORKSPACE_SUBAGENT_ID, runNarrativeSeedWorkspaceAgent } 
 import type { XingyiAvatarCropPreset } from '../../app/xingyiConversationAvatarTools'
 import { createXingyiBatchCharacterProvider } from '../../app/xingyiBatchCharacterProvider'
 import type { XingyiConversationMember } from '../../app/xingyiConversationMemberTools'
+import { createXingyiPlayableWorldDocumentLibrary } from '../../app/xingyiPlayableWorldDocumentLibrary'
 import type { XingyiWriteConfirmRequest } from '../../app/xingyiFunctionTools'
 import type { XingyiAskUserRequest } from '../../app/xingyiAskUserTool'
 import type { XingyiStatusScopeRequest, XingyiStatusScopeSelection } from '../../app/xingyiStatusScopeTool'
@@ -442,14 +443,17 @@ import {
   buildChatSessionPatch,
   createChatMessageBySessionId,
   createChatSession,
+  createWorld,
   createXingyiChatSession,
   deleteChatSessionById,
   ensureXingyiChatSession,
   executeOrchestrationCommands,
   fetchChatSessionBundleById,
+  fetchChatSessionCharacterPresence,
   fetchNarrativeSeeds,
   fetchNarrativeSeedDetail,
   fetchOrchestrationWorkspaceProjection,
+  fetchWorldDetail,
   createNarrativeSeed,
   updateNarrativeSeed,
   deleteNarrativeSeed,
@@ -463,6 +467,9 @@ import {
   getChatStoreCurrentSession,
   listXingyiChatSessions,
   normalizeChatSessionCharacterParticipants,
+  attachSessionWorld,
+  saveWorldDocLinks,
+  setChatSessionCharacterPresence,
   saveChatSessionPatchById,
   // 带图乐观发送（2026-07-11）：caption 后台补全完成后，用它把合并好的完整附件数组整体回填落库消息。
   updateChatMessageBySessionId,
@@ -587,7 +594,13 @@ import {
   saveAgentConversationModelSelection,
   saveAgentConversationTaskTodo
 } from '../../app/agentRuntime/conversationContinuation'
-import { filterSlashCommands, parseSlashQuery, type XingyiSlashCommand } from '../../app/xingyiSlashCommands'
+import {
+  PLAYABLE_WORLD_SLASH_COMMAND_NAME,
+  filterSlashCommands,
+  parsePlayableWorldSlashCommand,
+  parseSlashQuery,
+  type XingyiSlashCommand
+} from '../../app/xingyiSlashCommands'
 import { resolveXingyiGlobalStatus, xingyiDockRunStatus } from '../../app/xingyiGlobalStatus'
 import {
   buildAgentConversationModelAiOptions,
@@ -1284,6 +1297,13 @@ function closeSlashPanel() {
 }
 
 async function executeSlashCommand(command: XingyiSlashCommand) {
+  if (command.name === PLAYABLE_WORLD_SLASH_COMMAND_NAME) {
+    draft.value = '/build-world '
+    slashSelectedIndex.value = 0
+    await nextTick()
+    composerRef.value?.focus?.()
+    return
+  }
   draft.value = ''
   slashSelectedIndex.value = 0
   if (command.name === 'clear') {
@@ -2295,6 +2315,10 @@ async function runXingyiTurn(
   sendingIds: string[],
   liveMessage: XingyiDisplayMessage
 ) {
+  const playableWorldSlashRequest = parsePlayableWorldSlashCommand(text)
+  const agentUserText = playableWorldSlashRequest === null
+    ? text
+    : playableWorldSlashRequest || '请创建一个完整、可以直接开始游玩的世界；请自行确定有辨识度的主题和开场。'
   const continuationSessionId = sessionId.value
   let capturedMessageId = 0
   let captionFlushNeeded = false
@@ -2331,16 +2355,34 @@ async function runXingyiTurn(
       }
     })
     const agentConfig = settingStore.getBrainAgentConfig?.() || null
+    const batchCharacterProvider = createXingyiBatchCharacterProvider({
+      listGroups: () => (charStore.characterGroups || []).map((group) => ({
+        id: String(group.id || ''),
+        name: String(group.name || group.id || '')
+      })),
+      store: {
+        addCharacter: (character) => charStore.addCharacter(character),
+        updateCharacter: (characterId, changes) => charStore.updateCharacter(characterId, changes),
+        getCharacter: (characterId) => charStore.getCharacter(characterId)
+      },
+      getAgentConfig: () => settingStore.getBrainAgentConfig(),
+      callAI: ai.callAI as never
+    })
     const activeContextSessionId = getChatStoreActiveSessionId(chatStore)
     const agentContextBlock = activeContextSessionId
       ? (await loadRenderedAgentContext({
           agentKind: 'xingyi',
           sessionId: activeContextSessionId,
-          userText: text
+          userText: agentUserText
         })).text
       : ''
     const result = await runXingyiAgent({
-      userText: text,
+      userText: agentUserText,
+      ...(playableWorldSlashRequest !== null ? { skillActivations: [{
+        skillId: 'xingyi.playable-world-builder',
+        activation: 'explicit_route' as const,
+        reason: 'slash_command:/build-world'
+      }] } : {}),
       history,
       ...(agentContextBlock ? { agentContextBlock } : {}),
       ...(attachments.length ? { attachments } : {}),
@@ -2815,19 +2857,250 @@ async function runXingyiTurn(
         },
         moveGroup: (groupId, direction) => charStore.moveCharGroup(groupId, direction)
       },
-      batchCharacters: createXingyiBatchCharacterProvider({
-        listGroups: () => (charStore.characterGroups || []).map((group) => ({
-          id: String(group.id || ''),
-          name: String(group.name || group.id || '')
-        })),
-        store: {
-          addCharacter: (character) => charStore.addCharacter(character),
-          updateCharacter: (characterId, changes) => charStore.updateCharacter(characterId, changes),
-          getCharacter: (characterId) => charStore.getCharacter(characterId)
+      batchCharacters: batchCharacterProvider,
+      playableWorldBuilder: {
+        createDocumentLibrary: (library) => createXingyiPlayableWorldDocumentLibrary({
+          adapter: unitCrudAdapters.docLibrary,
+          fetchState: (options) => fetchDocLibraryState(options)
+        }, library),
+        generateCharacter: async ({ requestedName, brief, signal }) => {
+          const outcome = await batchCharacterProvider.generateCharacter({
+            brief: `角色姓名必须固定为「${requestedName}」。\n${brief}`,
+            groupId: 'default',
+            signal
+          })
+          if (outcome.characterId && String(outcome.name || '').trim() !== requestedName) {
+            await charStore.updateCharacter(outcome.characterId, { name: requestedName } as never)
+            return { ...outcome, name: requestedName }
+          }
+          return outcome
         },
-        getAgentConfig: () => settingStore.getBrainAgentConfig(),
-        callAI: ai.callAI as never
-      }),
+        findCharacterByName: async (name) => {
+          const matches = (charStore.characters || []).filter((character) => String(character?.name || '').trim() === name.trim())
+          if (matches.length > 1) throw new Error(`已有 ${matches.length} 个同名角色「${name}」，无法安全判断应复用哪一个`)
+          const existing = matches[0]
+          return existing ? { id: String(existing.id), name: String(existing.name || name), requestedName: name } : null
+        },
+        listWorlds: async () => (await fetchWorlds()).map((world) => ({
+          id: String(world.id || ''),
+          name: String(world.name || ''),
+          description: String(world.description || '')
+        })),
+        createWorld: async (world) => {
+          const created = await createWorld(world)
+          return { id: created.id, name: created.name, description: created.description }
+        },
+        readWorldDocumentIds: async (worldId) => (await fetchWorldDetail(worldId)).docLinks,
+        mountWorldDocuments: (worldId, documentIds) => saveWorldDocLinks(worldId, documentIds),
+        createConversation: async ({ title, members }) => {
+          const first = members[0]
+          if (!first) throw new Error('创建可玩会话至少需要一个正式角色')
+          const bundle = await createChatSession({
+            targetId: first.id,
+            targetType: 'char',
+            title,
+            participants: members.map((member, index) => ({
+              targetId: member.id,
+              targetType: 'char',
+              displayName: member.name,
+              displayOrder: index,
+              role: 'member',
+              probability: 100
+            }))
+          })
+          const createdSessionId = String(bundle?.session?.id || '').trim()
+          if (!createdSessionId) throw new Error('创建会话后没有返回 sessionId')
+          await chatStore.switchSession?.(createdSessionId)
+          return { sessionId: createdSessionId, title: String(bundle?.session?.title || title) }
+        },
+        findConversation: async ({ title, members, worldId }) => {
+          const expectedMemberIds = [...new Set(members.map((member) => member.id))].sort()
+          const candidates = Object.values((chatStore.entities?.chatSessions || {}) as Record<string, any>)
+            .filter((candidate: any) => !isAgentSessionKind(candidate?.kind) && String(candidate?.title || candidate?.name || '').trim() === title.trim())
+          const compatible: Array<{ sessionId: string; title: string }> = []
+          for (const candidate of candidates) {
+            const candidateSessionId = String(candidate?.id || '').trim()
+            if (!candidateSessionId) continue
+            const bundle = await fetchChatSessionBundleById(candidateSessionId, { limit: 1 })
+            const candidateMemberIds = normalizeChatSessionCharacterParticipants({
+              participants: Array.isArray(bundle?.participants) ? bundle.participants : bundle?.session?.participants || []
+            }).map((participant) => participant.characterId).sort()
+            if (JSON.stringify(candidateMemberIds) !== JSON.stringify(expectedMemberIds)) continue
+            const boundWorldId = String(bundle?.session?.worldId ?? bundle?.session?.world_id ?? '').trim()
+            if (boundWorldId && boundWorldId !== worldId) {
+              throw new Error(`同名会话「${title}」已挂载另一个世界，不能把它改挂到当前世界`)
+            }
+            compatible.push({ sessionId: candidateSessionId, title: String(bundle?.session?.title || title) })
+          }
+          if (compatible.length > 1) throw new Error(`找到 ${compatible.length} 个同名同成员会话「${title}」，无法安全选择续建目标`)
+          return compatible[0] || null
+        },
+        attachSessionToWorld: async (targetSessionId, worldId) => {
+          const attached = await attachSessionWorld(targetSessionId, { worldId })
+          await chatStore.switchSession?.(targetSessionId)
+          return { worldId: String(attached.world?.id || attached.session?.worldId || '') }
+        },
+        markCharactersPresent: async ({ sessionId: targetSessionId, worldId, characterIds, locationText }) => {
+          const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
+          const participantRows = Array.isArray(bundle?.participants)
+            ? bundle.participants
+            : Array.isArray(bundle?.session?.participants) ? bundle.session.participants : []
+          const participantByCharacterId = new Map<string, string>()
+          for (const row of participantRows as any[]) {
+            const participantType = String(row?.participantType ?? row?.participant_type ?? 'char')
+            const characterId = String(row?.participantTargetId ?? row?.participant_target_id ?? row?.targetId ?? row?.target_id ?? '').trim()
+            const participantId = String(row?.id || '').trim()
+            if (participantType === 'char' && characterId && participantId) participantByCharacterId.set(characterId, participantId)
+          }
+          const missing = characterIds.filter((characterId) => !participantByCharacterId.has(characterId))
+          if (missing.length) throw new Error(`会话成员没有正式 participantId：${missing.join('、')}`)
+          const before = await fetchChatSessionCharacterPresence(targetSessionId)
+          const beforeByParticipant = new Map(before.items.map((item) => [item.participantId, item]))
+          for (const characterId of characterIds) {
+            const participantId = participantByCharacterId.get(characterId)!
+            const current = beforeByParticipant.get(participantId)
+            if (current?.presenceState === 'present') continue
+            await setChatSessionCharacterPresence(targetSessionId, {
+              participantId,
+              worldId,
+              presenceState: 'present',
+              locationText,
+              expectedVersion: Number(current?.version || 0),
+              idempotencyKey: `playable-world:${targetSessionId}:${participantId}:present`,
+              evidenceSummary: '一键开玩世界创建会话时，用户要求所有新角色在开场处在场。',
+              lastModifiedSource: 'xingyi_playable_world_builder'
+            })
+          }
+          const after = await fetchChatSessionCharacterPresence(targetSessionId)
+          const expectedParticipantIds = characterIds.map((characterId) => participantByCharacterId.get(characterId)!)
+          const presentParticipantIds = after.items
+            .filter((item) => expectedParticipantIds.includes(item.participantId) && item.presenceState === 'present')
+            .map((item) => item.participantId)
+          return { participantIds: presentParticipantIds }
+        },
+        createNarrativeSeed: async (worldId, input) => {
+          const created = await createNarrativeSeed(worldId, input)
+          const createdId = String(created?.id || '').trim()
+          const sourceSessionId = String(input.sourceSessionId || '').trim()
+          if (createdId && sourceSessionId) narrativeSeedsRefresh = {
+            worldId,
+            sessionId: sourceSessionId
+          }
+          return { id: createdId }
+        },
+        findNarrativeSeedByTitle: async (worldId, title) => {
+          const matches = (await fetchNarrativeSeeds(worldId)).filter((seed) => String(seed?.title || '').trim() === title.trim())
+          if (matches.length > 1) throw new Error(`世界中已有 ${matches.length} 条同名叙事种子「${title}」，无法安全判断应复用哪一条`)
+          const id = String(matches[0]?.id || '').trim()
+          return id ? { id } : null
+        },
+        hasCharacterAvatar: async (characterId) => {
+          const character = charStore.getCharacter(characterId) as Record<string, unknown> | null
+          return Boolean(String(character?.avatarPath ?? character?.avatar_path ?? '').trim())
+        },
+        hasSessionAvatar: async (targetSessionId) => {
+          const local = (chatStore.entities?.chatSessions || {})[targetSessionId] as Record<string, unknown> | undefined
+          if (local && String(local.conversationAvatarPath ?? local.conversation_avatar_path ?? '').trim()) return true
+          const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
+          return Boolean(String(bundle?.session?.conversationAvatarPath ?? bundle?.session?.conversation_avatar_path ?? '').trim())
+        },
+        generateAvatar: async (prompt, signal) => {
+          const generated = await ai.generateImage(prompt, {
+            ...buildTaskModelAiOptions(agentConfig, 'xingyiAgent', { thinking: 'disabled' }),
+            feature: 'xingyi',
+            sessionId: sessionId.value,
+            sessionLabel: '星依',
+            signal
+          })
+          return generated.attachment
+        },
+        assignCharacterAvatar: async (characterId, image) => {
+          const avatarDataUrl = await readImageUrlAsDataUrl(image.url)
+          if (!avatarDataUrl) throw new Error('角色头像文件读取失败')
+          await charStore.updateCharacter(characterId, { avatarPath: avatarDataUrl } as never)
+        },
+        assignSessionAvatar: async (targetSessionId, image) => {
+          const avatarDataUrl = await readImageUrlAsDataUrl(image.url)
+          if (!avatarDataUrl) throw new Error('群聊头像文件读取失败')
+          if (getChatStoreActiveSessionId(chatStore) === targetSessionId) {
+            await chatStore.updateSession(targetSessionId, { conversationAvatarPath: avatarDataUrl })
+            return
+          }
+          await saveChatSessionPatchById(targetSessionId, buildChatSessionPatch({ conversationAvatarPath: avatarDataUrl }))
+        },
+        inspectBuild: async ({ world: worldIdentifier, session: sessionIdentifier }) => {
+          const normalizedWorldIdentifier = String(worldIdentifier || '').trim()
+          const worlds = await fetchWorlds()
+          const matchedWorlds = worlds.filter((candidate) => {
+            const candidateId = String(candidate?.id || '').trim()
+            const candidateName = String(candidate?.name || '').trim()
+            return candidateId === normalizedWorldIdentifier || candidateName === normalizedWorldIdentifier
+          })
+          if (!matchedWorlds.length) throw new Error(`没有找到世界「${normalizedWorldIdentifier}」，请填写精确世界名称或 worldId`)
+          if (matchedWorlds.length > 1) throw new Error(`找到 ${matchedWorlds.length} 个精确匹配的世界，请改用 worldId`)
+          const matchedWorld = matchedWorlds[0]
+          const worldId = String(matchedWorld.id || '').trim()
+          const detail = await fetchWorldDetail(worldId)
+          const normalizedSessionIdentifier = String(sessionIdentifier || '').trim()
+          const sessionCandidates = normalizedSessionIdentifier
+            ? detail.sessions.filter((candidate) => (
+                String(candidate.id || '').trim() === normalizedSessionIdentifier
+                || String(candidate.name || '').trim() === normalizedSessionIdentifier
+              ))
+            : detail.sessions
+          if (!sessionCandidates.length) {
+            throw new Error(normalizedSessionIdentifier
+              ? `世界「${matchedWorld.name}」下没有会话「${normalizedSessionIdentifier}」`
+              : `世界「${matchedWorld.name}」下没有可验收的会话`)
+          }
+          if (sessionCandidates.length > 1) {
+            throw new Error(normalizedSessionIdentifier
+              ? `世界下有 ${sessionCandidates.length} 个同名会话，请改用 sessionId`
+              : `世界下有 ${sessionCandidates.length} 个会话，请同时填写 session 名称或 sessionId`)
+          }
+          const matchedSession = sessionCandidates[0]
+          const targetSessionId = String(matchedSession.id || '').trim()
+          const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
+          const participantRows = Array.isArray(bundle?.participants)
+            ? bundle.participants
+            : Array.isArray(bundle?.session?.participants) ? bundle.session.participants : []
+          const participants = normalizeChatSessionCharacterParticipants({ participants: participantRows })
+          const presence = await fetchChatSessionCharacterPresence(targetSessionId)
+          const presenceByParticipantId = new Map(presence.items.map((item) => [item.participantId, item.presenceState]))
+          const characters = participants.map((participant) => {
+            const character = charStore.getCharacter(participant.characterId) as Record<string, unknown> | null
+            const participantId = String(participant.participantId || '').trim()
+            return {
+              id: participant.characterId,
+              name: String(character?.name || participant.characterId),
+              participantId,
+              presenceState: participantId ? String(presenceByParticipantId.get(participantId) || 'unknown') : 'unknown',
+              avatarReady: Boolean(String(character?.avatarPath ?? character?.avatar_path ?? '').trim())
+            }
+          })
+          const seeds = await fetchNarrativeSeeds(worldId)
+          const sessionWorldId = String(bundle?.session?.worldId ?? bundle?.session?.world_id ?? '').trim()
+          const sessionAvatarPath = String(
+            bundle?.session?.conversationAvatarPath
+            ?? bundle?.session?.conversation_avatar_path
+            ?? ''
+          ).trim()
+          return {
+            world: { id: worldId, name: String(matchedWorld.name || worldId) },
+            session: {
+              id: targetSessionId,
+              title: String(bundle?.session?.title || matchedSession.name || targetSessionId),
+              worldId: sessionWorldId,
+              avatarReady: Boolean(sessionAvatarPath)
+            },
+            documentIds: [...new Set(detail.docLinks.map((id) => String(id || '').trim()).filter(Boolean))],
+            characters,
+            narrativeSeeds: seeds
+              .map((seed) => ({ id: String(seed?.id || '').trim(), title: String(seed?.title || '').trim() }))
+              .filter((seed) => seed.id)
+          }
+        }
+      },
       // 显式会话解析器（取料闭环计划批次3）：把 session 参数（会话名/联系人名/targetId/sessionId）
       // 解析成完整上下文（含成员角色），让状态系统/读投影工具能操作非活动会话（没打开对话时指定用）。
       resolveSessionContext: async (identifier) => {

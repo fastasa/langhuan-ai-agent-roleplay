@@ -358,6 +358,21 @@ describe('ChatInputBar', () => {
       expect(event.defaultPrevented).toBe(true)
     })
 
+    it('粘贴文字时图片处理器返回 false，保留浏览器默认文字粘贴', async () => {
+      const handleImageAttachmentPaste = vi.fn(() => false)
+      const wrapper = mountInput({ handleImageAttachmentPaste })
+      const textarea = wrapper.find('textarea')
+      const event = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', {
+        value: { getData: (type) => type === 'text/plain' ? '要粘贴的文字' : '' }
+      })
+
+      textarea.element.dispatchEvent(event)
+
+      expect(handleImageAttachmentPaste).toHaveBeenCalledTimes(1)
+      expect(event.defaultPrevented).toBe(false)
+    })
+
     it('拖拽悬停给输入壳加高亮态 class，drop 后摘掉并转发事件', async () => {
       const handleImageAttachmentDrop = vi.fn()
       const handleImageAttachmentDragOver = vi.fn()

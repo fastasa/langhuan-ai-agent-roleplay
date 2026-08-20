@@ -160,79 +160,12 @@
       >
         <!-- 提调带（2026-07-04 位置改造）：历史轮内联带已移除，历史轮 + 活动轮统一收进顶部提调坞
              TidiaoDirectorDock（壳上 ‹ N/M › 切轮回看）；轮分组数据源 roundDirectorStreamGroups 保留供坞消费。 -->
-        <div
-          v-if="isNarrationDebugMessage(msg) && isDebugGroupStart(i)"
-          class="chat-debug-group"
-          :class="{ 'is-expanded': isDebugGroupExpanded(i) }"
-          :ref="(el) => bindMessageRowRef(i, el)"
-        >
-          <button
-            type="button"
-            class="chat-debug-group__summary"
-            :aria-expanded="isDebugGroupExpanded(i)"
-            @click="toggleDebugGroup(i)"
-          >
-            <span class="chat-debug-group__chevron" aria-hidden="true">›</span>
-            <span class="chat-debug-group__title">{{ t('chat.debugInfo') }}</span>
-            <span class="chat-debug-group__count">{{ t('chat.itemsCount', { count: getDebugGroupAt(i).messages.length }) }}</span>
-          </button>
-          <div v-if="isDebugGroupExpanded(i)" class="chat-debug-group__body">
-            <div
-              v-for="entry in getDebugGroupAt(i).messages"
-              :key="entry.index"
-              class="chat-message chat-message--narration-debug"
-              :ref="(el) => bindMessageRowRef(entry.index, el)"
-            >
-              <div class="chat-bubble">
-                <div
-                  v-if="displayChatText(getDisplayedContent(entry.message, entry.index))"
-                  class="chat-text"
-                  v-html="formatMessageText(entry.message, displayChatText(getDisplayedContent(entry.message, entry.index)))"
-                ></div>
-                <div class="msg-actions">
-                  <button
-                    v-if="entry.message.role !== 'user' && entry.message.id"
-                    class="msg-action-btn"
-                    :data-prompt-message-id="resolvePromptLogMessageId(entry.message)"
-                    @click="openPromptLog(entry.message)"
-                    :title="t('chat.viewPromptLog')"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>
-                      <path d="m10 8-3 3 3 3"/>
-                      <path d="m14 14 3-3-3-3"/>
-                    </svg>
-                  </button>
-                  <button
-                    v-if="canUseLocalTools && shouldShowMessageRecallAction(entry.message)"
-                    class="msg-action-btn"
-                    :data-recall-message-id="resolveMessageId(entry.message)"
-                    @click="openRecallActivityForMessage(entry.message)"
-                    :title="t('chat.viewRecallProcessDetails')"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M19.07 4.93A10 10 0 0 0 6.99 3.34"/>
-                      <path d="M4 6h.01"/>
-                      <path d="M2.29 9.62A10 10 0 1 0 21.31 8.35"/>
-                      <path d="M16.24 7.76A6 6 0 1 0 8.23 16.67"/>
-                      <path d="M12 18h.01"/>
-                      <path d="M17.99 11.66A6 6 0 0 1 15.77 16.67"/>
-                      <circle cx="12" cy="12" r="2"/>
-                      <path d="m13.41 10.59 5.66-5.66"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       <div
-        v-else-if="!isNarrationDebugMessage(msg)"
+        v-if="!isNarrationDebugMessage(msg)"
         class="chat-message"
         :class="{
           self: msg.role === 'user',
           'chat-message--narration': isNarrationMessage(msg),
-          'chat-message--narration-debug': isNarrationDebugMessage(msg),
           'chat-message--focused-action': isFocusedAction(msg),
           'chat-message--focused-action-private': isPrivateFocusedAction(msg)
         }"
@@ -242,6 +175,7 @@
       >
         <div class="chat-message-header">
           <button
+            v-if="!isNarrationMessage(msg)"
             type="button"
             class="chat-avatar"
             :class="{ 'chat-avatar--clickable': canOpenProfileFromAvatar(msg) }"
@@ -249,13 +183,11 @@
             :aria-label="getAvatarActionTitle(msg)"
             @click="handleMessageAvatarClick(msg, $event)"
           >
-            <span v-if="isNarrationDebugMessage(msg)">{{ t('chat.debugBadge') }}</span>
-            <span v-else-if="isNarrationMessage(msg)">{{ t('chat.narrationBadge') }}</span>
-            <img v-else-if="msg.role === 'assistant' && getCharAvatar(msg.name || '')" :src="getCharAvatar(msg.name || '')" />
+            <img v-if="msg.role === 'assistant' && getCharAvatar(msg.name || '')" :src="getCharAvatar(msg.name || '')" />
             <img v-else-if="msg.role === 'user' && currentUserAvatar" :src="currentUserAvatar" />
             <span v-else>{{ msg.role === 'user' ? currentUserEmoji : (getCharEmoji(msg.name || '') || t('chat.characterFallback')) }}</span>
           </button>
-          <div v-if="!isNarrationDebugMessage(msg)" class="chat-sender">{{ getMessageSenderLabel(msg) }}</div>
+          <div class="chat-sender">{{ getMessageSenderLabel(msg) }}</div>
         </div>
         <div
           class="chat-bubble"
@@ -815,31 +747,9 @@ const shouldShowEnvironmentNarrationLoading = computed(() => {
   return !isNarrationTyping.value
 })
 
-type DebugMessageGroup = {
-  startIndex: number
-  messages: Array<{ index: number; message: ChatMessageViewModel }>
-}
-
 // 楼层号计数复用共享真值 assignChatFloorNumbers（与移动端、后端提调读会话消息工具同一套编号）；
 // 分类仍用本地 getMessageFloorKind 保持原有口径不变。联动：见 chatMessageFloor.ts 头注释。
 const messageFloorMap = computed(() => assignChatFloorNumbers(props.currentMessages, getMessageFloorKind))
-
-const debugMessageGroups = computed(() => {
-  const groups = new Map<number, DebugMessageGroup>()
-  let activeGroup: DebugMessageGroup | null = null
-  props.currentMessages.forEach((message, index) => {
-    if (!isNarrationDebugMessage(message)) {
-      activeGroup = null
-      return
-    }
-    if (!activeGroup) {
-      activeGroup = { startIndex: index, messages: [] }
-      groups.set(index, activeGroup)
-    }
-    activeGroup.messages.push({ index, message })
-  })
-  return groups
-})
 
 const messagesAreaRef = ref<HTMLElement | null>(null)
 const pendingForceScroll = ref(true)
@@ -848,7 +758,6 @@ const editingAreaRefs = ref<Record<number, HTMLElement | null>>({})
 const editingActionsRefs = ref<Record<number, HTMLElement | null>>({})
 const selectionNoteMenuRef = ref<HTMLElement | null>(null)
 const expandedThoughtKeys = ref<Set<string>>(new Set())
-const expandedDebugGroupKeys = ref<Set<number>>(new Set())
 const recallActivityEntryLabelsByMessageKey = ref<Record<string, string>>({})
 const displayableRecallActivityEntryKeys = ref<Record<string, boolean>>({})
 const recallActivityAssistantKeysAtRunStart = ref<Record<string, string[]>>({})
@@ -1312,28 +1221,6 @@ function isNarrationDebugMessage(msg: ChatMessageViewModel) {
   return messageKind === 'narration_debug' || speakerName === '旁白调试'
 }
 
-function isDebugGroupStart(index: number) {
-  return debugMessageGroups.value.has(index)
-}
-
-function getDebugGroupAt(index: number): DebugMessageGroup {
-  return debugMessageGroups.value.get(index) || { startIndex: index, messages: [] }
-}
-
-function isDebugGroupExpanded(index: number) {
-  return expandedDebugGroupKeys.value.has(index)
-}
-
-function toggleDebugGroup(index: number) {
-  const next = new Set(expandedDebugGroupKeys.value)
-  if (next.has(index)) {
-    next.delete(index)
-  } else {
-    next.add(index)
-  }
-  expandedDebugGroupKeys.value = next
-}
-
 // 楼层分类复用共享真值 classifyChatFloorKind（与移动端、后端提调读会话消息工具同一口径）。
 // 联动：见 chatMessageFloor.ts 头注释。注：渲染样式用的 isNarrationMessage/isNarrationDebugMessage 是另一套口径，与楼层分类无关。
 function getMessageFloorKind(msg: ChatMessageViewModel): ChatFloorKind | '' {
@@ -1352,7 +1239,6 @@ function isRegeneratingNarrationAt(index: number, msg: ChatMessageViewModel) {
 }
 
 function getMessageSenderLabel(msg: ChatMessageViewModel) {
-  if (isNarrationDebugMessage(msg)) return t('chat.narrationDebug')
   if (isNarrationMessage(msg)) return t('chat.narration')
   return resolveChatMessageSpeakerName(msg, {
     userFallbackName: currentAlias.value?.name || userProfile.value?.name || t('chat.meFallback'),
@@ -1560,7 +1446,6 @@ function displayChatText(text: string) {
 }
 
 function formatMessageText(msg: ChatMessageViewModel, text: string) {
-  if (isNarrationDebugMessage(msg)) return formatDebugMessageText(text)
   const segments = precisionEditSegmentsForMsg(msg)
   if (!segments.length) return props.formatChatText(text)
   // 命中具体段→段级 shimmer span；一段都没定位到→正文原样渲染，整条退化高亮由 precisionWholeFallback 给容器加类。
@@ -1589,20 +1474,6 @@ function escapeHtml(text: string) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-}
-
-function formatDebugMessageText(text: string) {
-  const raw = String(text || '').trim()
-  const match = raw.match(/^【([^】]+)】([\s\S]*)$/)
-  if (!match) return props.formatChatText(raw)
-  const prefix = escapeHtml(match[1] || t('chat.debug'))
-  const body = escapeHtml(String(match[2] || '').replace(/^\s+/, ''))
-  return [
-    '<span class="debug-line">',
-    `<span class="debug-prefix">【${prefix}】</span>`,
-    `<span class="debug-body">${body.replace(/\n/g, '<br>')}</span>`,
-    '</span>'
-  ].join('')
 }
 
 function formatThoughtText(text: string) {

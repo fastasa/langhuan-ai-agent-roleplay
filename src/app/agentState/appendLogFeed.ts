@@ -1,6 +1,7 @@
 // 统一 state 协议 · runtime 保真事件 → append log 的统一喂入（R3-2 接线 + R3-3 lifecycle 透传 + R3-5 报错进 state）。
 //
-// 定位：runtime 的 onEvent 上抛 AgentRuntimeFidelityEvent（assistant-message/tool-call/tool-result），
+// 定位：runtime 的 onEvent 上抛 AgentRuntimeFidelityEvent；消息/工具事件写 append log，semantic-compaction 与
+// journal-error 属于运行时审计事件，不写提调业务日志，也不得兜底当作 tool-result。
 // 各 loop（群/单/纠偏/精修 harness）的 onEvent 此前各写一份「event.kind 分发 → append*Event」逻辑。本 helper 收口成一份：
 //   - assistant-message → appendMessageEvent
 //   - tool-call         → appendToolCallEvent
@@ -26,25 +27,35 @@ export function feedAppendLogFromFidelityEvent(
   registry?: ToolRegistry,
   origin?: AppendLogEventOrigin
 ): void {
-  if (event.kind === 'assistant-message') {
-    appendMessageEvent('', 'assistant', event.content, origin)
-    return
-  }
-  if (event.kind === 'tool-call') {
-    appendToolCallEvent('', event.toolCall, origin)
-    return
-  }
-  if (event.kind === 'tool-result') {
-    const result = event.toolResult
-    appendToolResultEvent('', result, registry?.get(result.toolName)?.fieldLifecycle, origin)
-    // R3-5：工具报错/被拦 → 同时作为一类 error 事件进 state（定位「哪一步、哪个工具、第几轮、什么错」）。
-    if (result.status === 'error' || result.status === 'blocked') {
-      const error = result.error || { type: 'TOOL_RUNTIME_ERROR' as const, message: result.content || '工具执行失败', retryable: false }
-      appendErrorEvent('', error, {
-        toolName: result.toolName,
-        ...(result.stage ? { stage: String(result.stage) } : {}),
-        turnIndex: event.turnIndex
-      }, origin)
+  switch (event.kind) {
+    case 'assistant-message':
+      appendMessageEvent('', 'assistant', event.content, origin)
+      return
+    case 'tool-call':
+      appendToolCallEvent('', event.toolCall, origin)
+      return
+    case 'tool-result': {
+      const result = event.toolResult
+      appendToolResultEvent('', result, registry?.get(result.toolName)?.fieldLifecycle, origin)
+      // R3-5：工具报错/被拦 → 同时作为一类 error 事件进 state（定位「哪一步、哪个工具、第几轮、什么错」）。
+      if (result.status === 'error' || result.status === 'blocked') {
+        const error = result.error || { type: 'TOOL_RUNTIME_ERROR' as const, message: result.content || '工具执行失败', retryable: false }
+        appendErrorEvent('', error, {
+          toolName: result.toolName,
+          ...(result.stage ? { stage: String(result.stage) } : {}),
+          turnIndex: event.turnIndex
+        }, origin)
+      }
+      return
+    }
+    case 'semantic-compaction':
+    case 'journal-error':
+      return
+    default: {
+      // 编译期穷尽门：以后新增 fidelity kind 时，必须先决定它能否进入业务日志。
+      const unhandledEvent: never = event
+      void unhandledEvent
+      return
     }
   }
 }

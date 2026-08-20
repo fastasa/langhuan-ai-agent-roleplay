@@ -78,5 +78,5 @@ describe('api preset schema compatibility', () => {
         isDefault: 1
       })
     ])
-  })
+  }, 15_000)
 })

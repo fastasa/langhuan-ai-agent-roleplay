@@ -72,6 +72,7 @@ describe('Agent Skill Supply Runtime 批次 1B', () => {
       'tidiao.environment-manual',
       'xingyi.doc-library-editing',
       'xingyi.knowledge-topics',
+      'xingyi.playable-world-builder',
       'xingyi.relation-hint-authoring',
       'zaoce.advanced-authoring',
       'zaoce.basic-authoring'

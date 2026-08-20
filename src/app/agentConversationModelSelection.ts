@@ -25,7 +25,7 @@ export const AGENT_CONVERSATION_MODEL_SLOTS: readonly AgentConversationModelSlot
 
 const DEFAULT_SLOT_BY_AGENT: Record<AgentSessionKind, AgentConversationModelSlotId> = {
   xingyi: 'smart',
-  scriptwriter: 'smart',
+  scriptwriter: 'balanced',
   cartographer: 'smart',
   personality_trainer: 'smart'
 }

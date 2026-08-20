@@ -75,6 +75,7 @@ export const xingyi = {
     clearDesc: '現在の会話コンテキストをクリアして新しい会話を始める',
     resumeDesc: '過去の会話を確認して復元する',
     modelDesc: 'この会話のモデルと思考の強度を切り替える',
-    diaryDesc: '今日の Xingyi 日記を生成する'
+    diaryDesc: '今日の Xingyi 日記を生成する',
+    buildWorldDesc: '一文で遊べる世界一式を作り、最後にアバターを生成する'
   }
 }

@@ -74,6 +74,10 @@ export const AGENT_SKILL_LOADER_REGISTRY: AgentSkillLoaderRegistry = {
     const { buildXingyiDocLibraryEditingSkillBody } = await import('../agentKnowledge/xingyiDocLibraryEditingKnowledge')
     return requireBody(buildXingyiDocLibraryEditingSkillBody(), skillId)
   },
+  'xingyi.playable-world-builder': async ({ skillId }) => {
+    const { buildXingyiPlayableWorldBuilderSkillBody } = await import('../agentKnowledge/xingyiPlayableWorldBuilderKnowledge')
+    return requireBody(buildXingyiPlayableWorldBuilderSkillBody(), skillId)
+  },
   'xingyi.relation-hint-authoring': async ({ skillId }) => {
     const { buildXingyiRelationHintSkillBody } = await import('../agentKnowledge/xingyiRelationHintKnowledge')
     return requireBody(buildXingyiRelationHintSkillBody(), skillId)

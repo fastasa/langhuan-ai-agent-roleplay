@@ -44,6 +44,8 @@ export interface NarrationGenerationInput {
   abortSignal?: AbortSignal
   now?: string
   sceneChangeNotice?: string
+  /** 当前命中情境的挂载提示词；与角色消息使用同一份情境配置真值。 */
+  scenarioMountedPromptText?: string
   skipCandidateArchive?: boolean
   narrationProfile?: NarrationProfile | null
   agentAuthoredPrompt?: {
@@ -581,6 +583,9 @@ export function buildNarrationPromptTrace(input: NarrationGenerationInput): Narr
   ].join('\n\n')
   const messages: NarrationPromptTrace['messages'] = [
     { role: 'system', content: systemPrompt },
+    ...(toText(input.scenarioMountedPromptText)
+      ? [{ role: 'system' as const, content: `情境挂载提示词：\n${toText(input.scenarioMountedPromptText)}` }]
+      : []),
     { role: 'user', content: buildUserPrompt(input) }
   ]
   return {

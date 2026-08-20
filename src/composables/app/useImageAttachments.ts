@@ -343,6 +343,19 @@ export function useImageAttachments(options: UseImageAttachmentsOptions = {}): U
   function handlePaste(e: ClipboardEvent): boolean {
     const items = e.clipboardData?.items
     if (!items) return false
+    // Windows/Chromium 复制富文本时常同时携带 text/plain、text/html 与一份位图预览。
+    // 有纯文本就让输入框走默认文字粘贴，不能被附带位图抢成图片附件。
+    const plainText = (() => {
+      try {
+        return String(e.clipboardData?.getData?.('text/plain') || '')
+      } catch {
+        return ''
+      }
+    })()
+    const hasPlainTextItem = Array.from(items).some((item) => (
+      item.kind === 'string' && item.type.toLowerCase() === 'text/plain'
+    ))
+    if (plainText || hasPlainTextItem) return false
     const imageFiles: File[] = []
     for (const item of Array.from(items)) {
       if (item.kind === 'file' && item.type.startsWith('image/')) {

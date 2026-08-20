@@ -30,6 +30,7 @@
 - `通用知识.md`：星依每次运行都收到的人工知识。
 - `skills/knowledge-topics/SKILL.md`：按需知识 Skill 入口；详细主题在其 `references/`。
 - `skills/doc-library-editing/SKILL.md`：文档库全局寻址、枝概览、单位 CRUD 与编译页同步的专项按需 Skill。
+- `skills/playable-world-builder/SKILL.md`：一句话生成文档、角色、世界、会话、全员在场、叙事种子，并在内容链完成后最后生成头像的全链路 Skill。
 - `skills/relation-hint-authoring/SKILL.md`：生成、优化或精修关系提示前强制读取的语法、谓词、证据与复诊专项 Skill。
 - `skill/xingyi-knowledge-maintenance/`：维护规范、质量标准、查询评测矩阵与自动审计工具。
 

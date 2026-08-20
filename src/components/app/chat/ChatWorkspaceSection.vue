@@ -91,8 +91,8 @@
       :label="props.viewModel.chatSummaryWritingText || '正在按投影写入轨迹'"
     />
 
-    <!-- 输入栏上方常驻「提调纠偏」浮条（单聊 + 群聊·D6 起；走完保留、决策流不消失）。智能二选一（用户 2026-06-20）：
-         带楼层号「角色3-5、旁白2 改委婉点」→ 按楼层精修；不带楼层号 → 对上一轮导演决策流纠偏续跑。
+    <!-- 输入栏上方常驻「提调」浮条（单聊 + 群聊·D6 起；走完保留、决策流不消失）。输入即与提调 Agent 对话：
+         带楼层号「角色3-5、旁白2 改委婉点」→ 按楼层精修；不带楼层号 → 据当前会话回答或执行修改。
          公开空库仍保留浮条轮廓：无 currentTarget 时禁用并提示先新建或选择角色，但默认只露细边；
          与正式交互一致，鼠标悬浮或点击聚焦后才抬起。
          可用判据用 currentTarget（单聊=角色 target、群聊=group_ target，均 truthy）而非 activeSessionId——
@@ -252,17 +252,16 @@ function handleRegenerateMessage(payload: number | { index?: number; mode?: 'rec
   props.actions.regenerateMessage?.(Number(payload?.index || 0), payload?.mode, instruction ? { instruction } : undefined)
 }
 
-// D6 群聊上下文特化：群聊一轮多发言者，浮条提示按楼层精修指定角色（改皮后单聊默认文案丢了楼层提示，
-// 群聊更需要它）；单聊保持改皮后的简洁文案。群聊判据复用 groupMembers（与旧 gate 同口径，>1=群聊）。
+// 群聊保留楼层提示；单聊/群聊都明确这是给提调 Agent 发消息，不再把自由文本描述成只能纠偏上一轮。
 const precisionEditPlaceholder = computed(() =>
   !props.viewModel.currentTarget
     ? t('chat.selectCharacterFirst')
     : props.groupMembers.length > 1
-    ? '提调修改群聊：带「角色2」按楼层精修指定角色，或直接说改方向纠偏'
-    : '输入消息，让提调修改聊天'
+    ? '给提调发消息；带「角色2」可精修楼层，也可直接提问或说修改要求'
+    : '给提调发消息；提问或修改要求都可以直接说'
 )
 
-// 持久纠偏栏提交 → 智能二选一（带楼层号精修 / 不带楼层号纠偏续跑），由 ops applyDirectorPrecisionEdits 分流。
+// 提调栏提交：带楼层号精修；自由文本仍正式唤起提调 Agent，由它据当前会话回答或执行修改。
 function handlePrecisionEdit(refsText: string) {
   props.actions.applyDirectorPrecisionEdits?.(String(refsText || ''))
 }

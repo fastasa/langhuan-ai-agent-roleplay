@@ -284,6 +284,6 @@ export const mobile = {
     tempCharacter: '一時キャラクター',
     formalCharacter: '正式キャラクター',
     tdsPlaceholderResume: 'ディレクターに返信してこのラウンドを継続',
-    tdsPlaceholderDefault: 'ディレクター修正：変えたい方向をそのまま伝えてください。「キャラクター2」を付けるとフロア単位で精密編集'
+    tdsPlaceholderDefault: 'ディレクターAgentにメッセージ：質問も修正依頼もそのまま送れます。「キャラクター2」でフロア単位編集'
   }
 }

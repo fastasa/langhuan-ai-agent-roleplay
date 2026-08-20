@@ -1294,6 +1294,50 @@ describe('useChatMessageOps', () => {
     expect(regenerateAssistantViaDirector).not.toHaveBeenCalled()
   })
 
+  it('提调自由文本会忽略旧 narration_debug；没有角色楼层时仍锚到用户消息启动正式 Agent 轮', async () => {
+    const currentMessages = ref([
+      { id: 201, role: 'user', content: '刚才为什么失败了？' },
+      { id: 202, role: 'assistant', messageKind: 'narration_debug', content: '旧调试详情' }
+    ])
+    const chatStore = {
+      currentChatTarget: 'char_1', activeChatSessionId: 'session_1', isTyping: false,
+      getActiveTargetId: vi.fn(() => 'char_1'), getActiveSessionId: vi.fn(() => 'session_1'),
+      getCurrentSession: vi.fn(() => ({ id: 'session_1', targetId: 'char_1', replyPipelineMode: 'normal_recall' })),
+      setTyping: vi.fn(), setCurrentMessageModel: vi.fn(), clearStopRequest: vi.fn(),
+      addMessage: vi.fn(), deleteMessage: vi.fn(), editMessage: vi.fn(async () => {})
+    }
+    const correctChatMessageViaDirector = vi.fn(async () => ({
+      strategy: 'chat-only',
+      edits: [],
+      regenerations: [],
+      escalation: null,
+      narrationCreations: [],
+      reprojectTargets: []
+    }))
+    const toast = vi.fn()
+    const messageOps = useChatMessageOps({
+      charStore: { getCharacter: vi.fn(() => ({ defaultPreset: '默认预设' })), characters: [{ id: 'char_1', name: '星依' }] },
+      chatStore,
+      settingStore: { defaultPreset: { name: '默认预设' }, presetSendCount: 20, currentLocation: '', getCurrentApiConfig: vi.fn(() => ({ name: '默认预设', model: 'test-model' })) },
+      callAIStream: vi.fn(),
+      correctChatMessageViaDirector,
+      cleanAiPrefix: vi.fn((text) => text), buildSystemPrompt: vi.fn(() => ''), buildPromptMessages: undefined,
+      detectLocationChange: vi.fn(() => ({ content: '', newLocation: null })),
+      toast, currentMessages, currentScene: ref('chat'), streamingText: ref(''),
+      getTargetName: vi.fn(() => '星依'), scrollToBottom: vi.fn()
+    })
+
+    await expect(messageOps.applyDirectorPrecisionEdits('你看见我这句话了吗？')).resolves.toBe(true)
+
+    expect(correctChatMessageViaDirector).toHaveBeenCalledWith(201, expect.objectContaining({
+      correctionText: '你看见我这句话了吗？',
+      anchorMessageId: 201,
+      allowUnanchoredChat: true
+    }))
+    expect(correctChatMessageViaDirector).not.toHaveBeenCalledWith(202, expect.anything())
+    expect(toast).not.toHaveBeenCalledWith(expect.stringContaining('还没有可纠偏'), 'warning')
+  })
+
   it('删除消息优先使用正式目标入口', () => {
     const currentMessages = ref([{ id: 22, role: 'assistant', content: '待删除' }])
     const openConfirmDialog = vi.fn((_title, _message, onConfirm) => onConfirm())

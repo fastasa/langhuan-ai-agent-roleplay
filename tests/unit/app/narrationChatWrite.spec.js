@@ -76,6 +76,31 @@ describe('narrationChatWrite', () => {
     expect(result.committedBatch).toBeUndefined()
   })
 
+  it('把当前情境挂载提示词作为独立系统区块交给旁白模型并写入审计日志', async () => {
+    const callAI = vi.fn(async () => '风从半开的窗缝里卷进一页薄纸。')
+    await generateAndWriteNarration({
+      session: { id: 'session_1' },
+      plan,
+      messages: [],
+      scenarioMountedPromptText: '本情境使用清亮、克制的短句。',
+      callAI,
+      now: '2026-05-10T01:00:00.000Z'
+    })
+
+    expect(callAI).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('本情境使用清亮、克制的短句。')
+      })
+    ]), expect.any(Object))
+    expect(chatRepository.createChatPromptLogBySessionId).toHaveBeenCalledWith('session_1', expect.objectContaining({
+      finalPrompt: expect.stringContaining('本情境使用清亮、克制的短句。'),
+      promptBlocks: expect.arrayContaining([
+        expect.objectContaining({ role: 'system', title: '系统区块 2' })
+      ])
+    }))
+  })
+
   it('saves recall evidence as a bound recall activity log without changing narration content', async () => {
     const callAI = vi.fn(async () => '门外有人带来一封被雨水洇湿的信。')
     const result = await generateAndWriteNarration({

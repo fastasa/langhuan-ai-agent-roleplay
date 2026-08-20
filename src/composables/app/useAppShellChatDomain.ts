@@ -140,8 +140,7 @@ export function useAppShellChatDomain(deps: any) {
     getTargetName: deps.getTargetName,
     scrollToBottom: deps.scrollToBottom,
     toast: deps.toast,
-    runtimeStore: deps.workspaceRuntimeStore,
-    canSeeNarrationDebug: deps.canSeeNarrationDebug
+    runtimeStore: deps.workspaceRuntimeStore
   })
 
   // 批次4-投影 灰度开关·真机对照控制台入口（增量5·2026-07-02 已翻默认 ON·退役后续删本块）：

@@ -229,7 +229,7 @@ const slashQuery = computed(() => parseSlashQuery(controller.state.draft))
 const slashCommands = computed(() => {
   if (slashQuery.value === null) return []
   return filterSlashCommands(slashQuery.value)
-    .filter((command) => command.name !== 'diary')
+    .filter((command) => !['diary', 'build-world'].includes(command.name))
 })
 const slashPanelMode = computed<'commands' | 'sessions' | null>(() => {
   if (modelPickerOpen.value) return null

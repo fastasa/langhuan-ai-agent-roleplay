@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   XINGYI_SLASH_COMMANDS,
   filterSlashCommands,
+  parsePlayableWorldSlashCommand,
   parseSlashQuery
 } from '../../../src/app/xingyiSlashCommands.ts'
 
@@ -32,11 +33,18 @@ describe('xingyiSlashCommands', () => {
 
   it('/diary 命令已登记在命令表里，且 d 能搜到它', () => {
     expect(XINGYI_SLASH_COMMANDS.map((item) => item.name)).toContain('diary')
-    expect(filterSlashCommands('d').map((item) => item.name)).toEqual(['model', 'diary'])
+    expect(filterSlashCommands('d').map((item) => item.name)).toEqual(['model', 'diary', 'build-world'])
     expect(filterSlashCommands('diary').map((item) => item.name)).toEqual(['diary'])
   })
 
   it('/model 命令已登记，供星依和专业 Agent 会话复用', () => {
     expect(filterSlashCommands('model').map((item) => item.name)).toEqual(['model'])
+  })
+
+  it('/build-world 可携带自然语言需求，且不误判普通消息', () => {
+    expect(parsePlayableWorldSlashCommand('/build-world 创建日式奇幻世界')).toBe('创建日式奇幻世界')
+    expect(parsePlayableWorldSlashCommand('/BUILD-WORLD')).toBe('')
+    expect(parsePlayableWorldSlashCommand('帮我创建完整世界')).toBe(null)
+    expect(filterSlashCommands('build-world').map((item) => item.name)).toEqual(['build-world'])
   })
 })

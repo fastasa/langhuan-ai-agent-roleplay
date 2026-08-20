@@ -100,13 +100,14 @@ describe('runXingyiAgent（陈星依总 agent harness·批次1）', () => {
     expect(request.messages[0].content).toContain('recallSemantic')
     expect(request.messages[0].content).toContain('searchWorldText')
     expect(request.messages[0].content).toContain('fetchUnitDetail')
-    // manifest commonTools（知识三件套 + 两个专项 Skill 读取 + askUser）+ toolsearch 首轮带 schema；取料三件套只在目录。
+    // manifest commonTools（知识三件套 + 三个专项 Skill 读取 + askUser）+ toolsearch 首轮带 schema；取料三件套只在目录。
     const briefNames = request.toolBriefs.map((brief) => brief.name)
     expect(briefNames).toEqual([
       'listXingyiKnowledgeTopics',
       'searchXingyiKnowledge',
       'readXingyiKnowledgeTopic',
       'readDocLibraryEditingSkill',
+      'readPlayableWorldBuilderSkill',
       'readRelationHintSkill',
       'askUser',
       'writeTaskTodo',
@@ -170,7 +171,7 @@ describe('runXingyiAgent（陈星依总 agent harness·批次1）', () => {
 
     expect(requests[0].toolBriefs.map((tool) => tool.name)).toEqual([
       'listXingyiKnowledgeTopics', 'searchXingyiKnowledge', 'readXingyiKnowledgeTopic',
-      'readDocLibraryEditingSkill', 'readRelationHintSkill', 'askUser',
+      'readDocLibraryEditingSkill', 'readPlayableWorldBuilderSkill', 'readRelationHintSkill', 'askUser',
       'writeTaskTodo', 'updateTaskTodo', 'toolsearch'
     ])
     const catalogEntry = requests[0].toolCatalog.find((tool) => tool.name === 'recallSemantic')

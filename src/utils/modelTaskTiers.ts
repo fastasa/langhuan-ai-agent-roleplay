@@ -7,11 +7,9 @@ import { buildModelUsageAiOptions } from './modelUsageConfig'
  * 不再直接点名槽位——改档只动本表，不动调用点。
  *
  * 档位口径（用户拍板）：
- *   掌阁 smart——统筹/纠偏/精修 loop（2026-07-10 状态系统融入提调计划：统筹升最高档·directorLoop 一个 id 管三处随之同升）、
- *              星依总 agent（2026-07-23 真机反馈：复杂跨文档任务改走最高档）、
- *              编剧 subagent（2026-07-10 剧本系统优化批次3 升真 loop 后入本表 scriptwriterConsult·原 spec.modelUsage 声明随注册表退役）、
+ *   掌阁 smart——星依总 agent（2026-07-23 真机反馈：复杂跨文档任务改走最高档）、
  *              灵魂自动写、琅嬛助理/人格校准/人格训练（原高量三处）
- *   校书 balanced——采风钻取 subagent（loop 型）、回复计划编排 loop、召回裁判等默认主力
+ *   校书 balanced——提调统筹/纠偏/精修 loop、编剧 subagent、采风钻取 subagent、回复计划编排 loop、召回裁判等默认主力
  *   执笔 message——角色消息与旁白消息正文专用
  *   书童 fast——人格/普通召回计划批次、人格内核解析、里程碑改写等格式化小任务
  *   编目 embedding——嵌入向量（embeddingPresetId 独立链路·不经文本槽，不在本表）
@@ -44,13 +42,13 @@ export type ModelTaskId =
   | 'sessionTempProfile'    // 会话临时角色/实体资料整理（服务端）
   | 'caifengResearch'       // 「采风」知识钻取 subagent 小 loop（统筹派遣·状态系统融入提调计划批次2）
   | 'zaoceBuild'            // 「造册」建状态栏 subagent 小 loop（scope 确认后后台建栏·并行编排计划批次B）
-  | 'scriptwriterConsult'   // 「编剧」剧本咨询 subagent 小 loop（剧本系统优化批次3 升真 loop·创作型=掌阁）
+  | 'scriptwriterConsult'   // 「编剧」剧本咨询 subagent 小 loop（统一走校书档）
   | 'mapDraw'               // 「绘舆」地图作图 subagent 小 loop（统筹/纠偏派遣·地图系统批5）
   | 'imageCaption'          // 「图片转述」聊天图片文字转述（输入框图片上传计划批2）——
                             // 图片转述需要该档配识图模型，档位本身不保证识图（能否真识图由 preset.supports_vision 决定）
 
 export const MODEL_TASK_TIERS: Record<ModelTaskId, ModelUsageSlotId> = {
-  directorLoop: 'smart',
+  directorLoop: 'balanced',
   replyRouteJudge: 'fast',
   focusedActionJudge: 'fast',
   replyPlanMain: 'balanced',
@@ -73,7 +71,7 @@ export const MODEL_TASK_TIERS: Record<ModelTaskId, ModelUsageSlotId> = {
   sessionTempProfile: 'balanced',
   caifengResearch: 'balanced',
   zaoceBuild: 'balanced',
-  scriptwriterConsult: 'smart',
+  scriptwriterConsult: 'balanced',
   mapDraw: 'balanced',
   imageCaption: 'balanced'
 }

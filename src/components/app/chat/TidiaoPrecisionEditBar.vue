@@ -2,8 +2,8 @@
   <!-- 「提调纠偏」抽屉条：藏在主输入框（.chat-input-area）身后，静止只露一条橄榄绿细边；
        鼠标移入上方命中区时整条上浮 30px 露出输入框与「提调」按钮（2026-06-22 按设计稿换皮；
        07-23 起输入框聚焦期间也维持上浮，避免输入触发布局重算或鼠标边界抖动时中途沉回、失焦）。
-       功能不变：智能二选一（用户 2026-06-20）——带楼层号「角色3-5、旁白2 改委婉点」→ 按楼层精修；
-       不带楼层号 → 把整段当纠偏，对上一轮导演决策流纠偏续跑（旧决策保留、新决策追加）。
+       输入即与提调 Agent 对话：带楼层号「角色3-5、旁白2 改委婉点」→ 按楼层精修；
+       不带楼层号 → 提调据当前会话自主回答或执行修改，不要求预先存在一条可纠偏角色消息。
        ⚠ 与移动端 MobileChatThread.vue 的 .mobile-tds-edit-bar 属于联动能力，外观若统一调整需同步那一处。
        ⚠ 「藏在身后」依赖主输入框 .chat-input-area 为不透明填充 + position/z-index（见 src/assets/main.css）。
        外层命中区 padding-top 改为动态（2026-07-12 用户拍板，用接近区换阅读空间）：静止 2px（连同绿边
@@ -27,7 +27,7 @@
         class="tds-tab__input"
         rows="1"
         :disabled="disabled"
-        :placeholder="props.placeholder || '输入消息，让提调修改聊天'"
+        :placeholder="props.placeholder || '给提调发消息；提问或修改要求都可以直接说'"
         @focus="focused = true"
         @blur="focused = false"
         @keydown.enter.exact="handleTextareaKeydown"

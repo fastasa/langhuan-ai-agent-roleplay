@@ -307,6 +307,18 @@ describe('useImageAttachments', () => {
     expect(kit.handlePaste(textEvent)).toBe(false)
     expect(kit.pendingImages.value).toHaveLength(1) // 未被打扰，仍是刚才那一张
 
+    const mixedEvent = {
+      clipboardData: {
+        getData: (type) => type === 'text/plain' ? '这是复制的文字' : '',
+        items: [
+          { kind: 'string', type: 'text/plain' },
+          { kind: 'file', type: 'image/png', getAsFile: () => makePngFile('clipboard-preview.png') }
+        ]
+      }
+    }
+    expect(kit.handlePaste(mixedEvent)).toBe(false)
+    expect(kit.pendingImages.value).toHaveLength(1)
+
     expect(kit.handlePaste({ clipboardData: null })).toBe(false)
   })
 

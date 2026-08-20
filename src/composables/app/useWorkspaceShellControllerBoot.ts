@@ -134,7 +134,6 @@ export function useWorkspaceShellControllerBoot() {
     chatStore,
     settingStore,
     taskStore,
-    canSeeNarrationDebug: () => true,
     callAI,
     callAIWithTools,
     callAIStream,

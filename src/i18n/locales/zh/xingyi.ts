@@ -77,6 +77,7 @@ export const xingyi = {
     clearDesc: '清除当前对话上下文，开启新对话',
     resumeDesc: '查看过往对话并恢复',
     modelDesc: '切换本对话的模型与努力程度',
-    diaryDesc: '生成今天的星依日记'
+    diaryDesc: '生成今天的星依日记',
+    buildWorldDesc: '一句话创建完整世界，并在全部内容完成后生成头像'
   }
 }

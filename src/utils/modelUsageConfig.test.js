@@ -112,8 +112,8 @@ describe('modelUsageConfig（五槽迁移）', () => {
 describe('modelTaskTiers（任务分级表）', () => {
   it('分级表档位=用户拍板口径', () => {
     expect(MODEL_TASK_TIERS).toEqual({
-      // 2026-07-10 状态系统融入提调计划：统筹升掌阁（directorLoop 一个 id 管统筹/纠偏/精修三处同升）。
-      directorLoop: 'smart',
+      // 提调统筹/纠偏/精修统一走校书（directorLoop 一个 id 管三处）。
+      directorLoop: 'balanced',
       replyRouteJudge: 'fast',
       focusedActionJudge: 'fast',
       replyPlanMain: 'balanced',
@@ -137,8 +137,8 @@ describe('modelTaskTiers（任务分级表）', () => {
       // 统筹派遣 subagent 小 loop（采风=融入计划批次2·造册=并行编排批次B·绘舆=地图系统批5）：校书档。
       caifengResearch: 'balanced',
       zaoceBuild: 'balanced',
-      // 编剧咨询小 loop（剧本系统优化批次3·2026-07-10 升真 loop 入本表）：创作型=掌阁档（沿旧 spec 拍板）。
-      scriptwriterConsult: 'smart',
+      // 编剧咨询小 loop 与可见编剧 Agent 默认统一走校书档。
+      scriptwriterConsult: 'balanced',
       mapDraw: 'balanced',
       imageCaption: 'balanced'
     })
