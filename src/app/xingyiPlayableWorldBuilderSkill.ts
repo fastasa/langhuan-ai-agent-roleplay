@@ -6,7 +6,7 @@ export const XINGYI_PLAYABLE_WORLD_BUILDER_SKILL_TOOL_NAME = 'readPlayableWorldB
 export function createReadXingyiPlayableWorldBuilderSkillTool(access: { markRead: () => void }): ToolDefinition {
   return {
     name: XINGYI_PLAYABLE_WORLD_BUILDER_SKILL_TOOL_NAME,
-    brief: '当用户要求一句话生成完整世界并直接开玩、同时创建文档库/角色/世界/群聊/叙事种子/头像，或表达同类自然语言意图时先调用，读取全链路蓝图与完成门槛。',
+    brief: '当用户要求一句话生成完整世界并直接开玩、同时创建文档库/分组角色/世界/群聊/开场时间地点天气/主要角色状态栏/叙事种子/头像，或表达同类自然语言意图时先调用，读取全链路蓝图与完成门槛。',
     schema: { type: 'object', properties: {} },
     validateArgs: () => null,
     execute: async () => {

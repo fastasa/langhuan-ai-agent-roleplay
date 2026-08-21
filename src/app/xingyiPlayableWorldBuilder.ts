@@ -26,6 +26,19 @@ export type PlayableWorldCharacter = {
   name: string
   brief: string
   avatarPrompt: string
+  groupName: string
+  status: {
+    description: string
+    values: Record<string, unknown>
+  }
+}
+
+export type PlayableWorldStatusField = {
+  key: string
+  label: string
+  valueType: 'text' | 'number' | 'list'
+  unit?: string
+  description?: string
 }
 
 export type PlayableWorldNarrativeSeed = {
@@ -59,7 +72,15 @@ export type PlayableWorldBlueprint = {
   session: {
     title: string
     openingLocation: string
+    openingWeather: string
+    openingTime?: string
+    timeRate?: number
     avatarPrompt: string
+  }
+  statusPanel: {
+    name: string
+    description: string
+    fields: PlayableWorldStatusField[]
   }
   narrativeSeeds: PlayableWorldNarrativeSeed[]
 }
@@ -82,6 +103,25 @@ export type PlayableWorldGeneratedCharacter = {
   requestedName: string
 }
 
+export type PlayableWorldCharacterGroupReceipt = {
+  id: string
+  name: string
+  created: boolean
+  characterIds: string[]
+}
+
+export type PlayableWorldSceneReceipt = {
+  openingTime: string
+  timeRate: number
+  openingLocation: string
+  openingWeather: string
+}
+
+export type PlayableWorldStatusReceipt = {
+  templateId: string
+  panels: Array<{ characterId: string; panelId: string }>
+}
+
 export type PlayableWorldBuildInspection = {
   world: { id: string; name: string }
   session: {
@@ -89,6 +129,7 @@ export type PlayableWorldBuildInspection = {
     title: string
     worldId: string
     avatarReady: boolean
+    scene: PlayableWorldSceneReceipt
   }
   documentIds: string[]
   characters: Array<{
@@ -97,6 +138,9 @@ export type PlayableWorldBuildInspection = {
     participantId: string
     presenceState: string
     avatarReady: boolean
+    groupId: string
+    groupName: string
+    statusPanelId: string
   }>
   narrativeSeeds: Array<{ id: string; title: string }>
 }
@@ -108,6 +152,10 @@ export interface XingyiPlayableWorldBuilderProvider {
   }>
   generateCharacter: (input: { requestedName: string; brief: string; signal?: AbortSignal }) => Promise<XingyiBatchCharacterOutcome>
   findCharacterByName: (name: string) => Promise<PlayableWorldGeneratedCharacter | null>
+  ensureCharacterGroups: (input: Array<{
+    groupName: string
+    characterIds: string[]
+  }>) => Promise<PlayableWorldCharacterGroupReceipt[]>
   listWorlds: () => Promise<PlayableWorldRecord[]>
   createWorld: (input: { name: string; description: string }) => Promise<PlayableWorldRecord>
   readWorldDocumentIds: (worldId: string) => Promise<string[]>
@@ -122,12 +170,26 @@ export interface XingyiPlayableWorldBuilderProvider {
     worldId: string
   }) => Promise<{ sessionId: string; title: string } | null>
   attachSessionToWorld: (sessionId: string, worldId: string) => Promise<{ worldId: string }>
+  configureSessionScene: (input: {
+    sessionId: string
+    worldId: string
+    openingLocation: string
+    openingWeather: string
+    openingTime?: string
+    timeRate?: number
+  }) => Promise<PlayableWorldSceneReceipt>
   markCharactersPresent: (input: {
     sessionId: string
     worldId: string
     characterIds: string[]
     locationText: string
   }) => Promise<{ participantIds: string[] }>
+  ensureCharacterStatusPanels: (input: {
+    sessionId: string
+    worldId: string
+    template: PlayableWorldBlueprint['statusPanel']
+    characters: Array<PlayableWorldGeneratedCharacter & { status: PlayableWorldCharacter['status'] }>
+  }) => Promise<PlayableWorldStatusReceipt>
   createNarrativeSeed: (worldId: string, input: Record<string, unknown>) => Promise<{ id: string }>
   findNarrativeSeedByTitle: (worldId: string, title: string) => Promise<{ id: string } | null>
   hasCharacterAvatar: (characterId: string) => Promise<boolean>
@@ -157,6 +219,8 @@ const DOCUMENT_MIN = 5
 const DOCUMENT_MAX = 12
 const SEED_MIN = 2
 const SEED_MAX = 6
+const STATUS_FIELD_MIN = 3
+const STATUS_FIELD_MAX = 10
 
 function text(value: unknown): string {
   return String(value ?? '').trim()
@@ -185,6 +249,16 @@ function hasDuplicate(values: readonly string[]): boolean {
 function isThreePartLocation(value: string): boolean {
   const parts = text(value).split('/').map(text)
   return parts.length === 3 && parts.every(Boolean)
+}
+
+function isDefaultGroupName(value: string): boolean {
+  return ['default', '默认', '默认分组', '未分类'].includes(compactMatchText(value))
+}
+
+function isStatusValueCompatible(field: PlayableWorldStatusField, value: unknown): boolean {
+  if (field.valueType === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (field.valueType === 'list') return Array.isArray(value) && value.every((item) => typeof item === 'string')
+  return typeof value === 'string'
 }
 
 export function resolvePlayableWorldMatch(
@@ -270,6 +344,12 @@ export function validatePlayableWorldBlueprint(args: Record<string, unknown>): s
     if (!text(character?.name)) return '每个主要角色都必须有确定姓名'
     if (text(character?.brief).length < 120) return `角色「${text(character?.name)}」的完整设定不足 120 字`
     if (text(character?.avatarPrompt).length < 30) return `角色「${text(character?.name)}」缺少完整头像画面描述`
+    if (!text(character?.groupName) || isDefaultGroupName(character?.groupName)) {
+      return `角色「${text(character?.name)}」必须指定有意义的非默认分组 groupName`
+    }
+    if (!character?.status || text(character.status.description).length < 20) {
+      return `角色「${text(character?.name)}」缺少至少 20 字的开场状态栏说明`
+    }
   }
 
   if (!blueprint.world || !text(blueprint.world.name) || !text(blueprint.world.description)) return 'world 必须包含名称与简介'
@@ -279,7 +359,41 @@ export function validatePlayableWorldBlueprint(args: Record<string, unknown>): s
 
   if (!blueprint.session || !text(blueprint.session.title)) return 'session 必须有明确标题'
   if (!isThreePartLocation(text(blueprint.session.openingLocation))) return '开场地点必须使用“大地点/中地点/小地点”三段格式'
+  if (!text(blueprint.session.openingWeather)) return '开场天气必须明确填写'
+  if (blueprint.session.openingTime !== undefined && text(blueprint.session.openingTime) && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(text(blueprint.session.openingTime))) {
+    return '自定义开场时间必须使用 YYYY-MM-DDTHH:mm 或 YYYY-MM-DDTHH:mm:ss；不填则由工具使用执行时的现实时间'
+  }
+  if (blueprint.session.timeRate !== undefined) {
+    const rate = Number(blueprint.session.timeRate)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 60) return '时间流速 timeRate 必须为 0～60；不填则为一倍速'
+  }
   if (text(blueprint.session.avatarPrompt).length < 30) return '群聊必须有完整头像画面描述'
+
+  const statusPanel = blueprint.statusPanel
+  const statusFields = Array.isArray(statusPanel?.fields) ? statusPanel.fields : []
+  if (!statusPanel || !text(statusPanel.name) || text(statusPanel.description).length < 20) {
+    return 'statusPanel 必须包含模板名称和至少 20 字的用途说明'
+  }
+  if (statusFields.length < STATUS_FIELD_MIN || statusFields.length > STATUS_FIELD_MAX) {
+    return `主要角色状态栏模板必须包含 ${STATUS_FIELD_MIN}～${STATUS_FIELD_MAX} 个字段`
+  }
+  if (hasDuplicate(statusFields.map((field) => text(field?.key)))) return '状态栏字段 key 不能重复'
+  for (const field of statusFields) {
+    if (!/^[a-z][a-z0-9_]{0,39}$/i.test(text(field?.key))) return `状态栏字段 key「${text(field?.key)}」不合法`
+    if (!text(field?.label)) return `状态栏字段「${text(field?.key)}」缺少 label`
+    if (!['text', 'number', 'list'].includes(text(field?.valueType))) return `状态栏字段「${text(field?.key)}」的 valueType 只能是 text/number/list`
+  }
+  const fieldKeys = new Set(statusFields.map((field) => field.key))
+  for (const character of characters) {
+    const values = character.status?.values
+    if (!values || typeof values !== 'object' || Array.isArray(values)) return `角色「${character.name}」的状态栏 values 必须是对象`
+    const extraKey = Object.keys(values).find((key) => !fieldKeys.has(key))
+    if (extraKey) return `角色「${character.name}」的状态栏包含模板外字段「${extraKey}」`
+    for (const field of statusFields) {
+      if (!Object.prototype.hasOwnProperty.call(values, field.key)) return `角色「${character.name}」的状态栏缺少字段「${field.key}」`
+      if (!isStatusValueCompatible(field, values[field.key])) return `角色「${character.name}」的状态栏字段「${field.key}」类型应为 ${field.valueType}`
+    }
+  }
 
   if (seeds.length < SEED_MIN || seeds.length > SEED_MAX) return `叙事种子必须为 ${SEED_MIN}～${SEED_MAX} 条`
   const characterNames = new Set(characters.map((item) => text(item.name)))
@@ -322,7 +436,7 @@ export function createReadPlayableWorldBuildReceiptTool(
 ): ToolDefinition {
   return {
     name: 'readPlayableWorldBuildReceipt',
-    brief: '只读核验既有的一键开玩世界，返回世界、会话、文档挂载、正式角色、全员在场、叙事种子和全部头像的真实 ID 与完成状态。用于旧任务、历史中断或结果回执丢失后的补验收；新调用 buildPlayableWorld 已返回 verified_complete 时无需再调用。',
+    brief: '只读核验既有的一键开玩世界，返回世界、会话、文档挂载、正式角色及分组、开场时间地点天气、全员在场、主要角色状态栏、叙事种子和全部头像的真实 ID 与完成状态。用于旧任务、历史中断或结果回执丢失后的补验收；新调用 buildPlayableWorld 已返回 verified_complete 时无需再调用。',
     mayHaveSideEffects: false,
     schema: {
       type: 'object',
@@ -354,6 +468,15 @@ export function createReadPlayableWorldBuildReceiptTool(
         if (inspection.session.worldId !== inspection.world.id) missing.push('会话未挂载到目标世界')
         const missingPresence = inspection.characters.filter((item) => !item.participantId || item.presenceState !== 'present')
         if (missingPresence.length) missing.push(`未确认在场：${missingPresence.map((item) => item.name).join('、')}`)
+        const missingGroups = inspection.characters.filter((item) => !item.groupId || item.groupId === 'default' || !item.groupName || isDefaultGroupName(item.groupName))
+        if (missingGroups.length) missing.push(`未进入正式角色分组：${missingGroups.map((item) => item.name).join('、')}`)
+        const scene = inspection.session.scene
+        if (!scene?.openingTime) missing.push('未设置开场时间')
+        if (!scene?.openingLocation || !isThreePartLocation(scene.openingLocation)) missing.push('未设置三段式开场地点')
+        if (!scene?.openingWeather) missing.push('未设置开场天气')
+        if (!Number.isFinite(Number(scene?.timeRate))) missing.push('未设置时间流速')
+        const missingStatusPanels = inspection.characters.filter((item) => !item.statusPanelId)
+        if (missingStatusPanels.length) missing.push(`缺少主要角色状态栏：${missingStatusPanels.map((item) => item.name).join('、')}`)
         if (inspection.narrativeSeeds.length < SEED_MIN) missing.push(`叙事种子不足 ${SEED_MIN} 条`)
         const missingAvatars = inspection.characters.filter((item) => !item.avatarReady).map((item) => `角色「${item.name}」`)
         if (!inspection.session.avatarReady) missingAvatars.push(`群聊「${inspection.session.title}」`)
@@ -366,7 +489,10 @@ export function createReadPlayableWorldBuildReceiptTool(
           `sessionId: ${inspection.session.id}（「${inspection.session.title}」，worldId=${inspection.session.worldId || '未挂载'}）`,
           `mountedDocumentIds: ${inspection.documentIds.join('、') || '无'}`,
           `characterIds: ${characterIds.join('、') || '无'}`,
+          `characterGroups: ${inspection.characters.map((item) => `${item.name}→${item.groupName || item.groupId || '未分组'}`).join('、') || '无'}`,
           `presenceParticipantIds: ${presenceParticipantIds.join('、') || '无'}${missingPresence.length ? '' : '（全员 present）'}`,
+          `scene: ${scene?.openingTime || '未设置'} · ${Number.isFinite(Number(scene?.timeRate)) ? `${scene.timeRate}x` : '流速未设置'} · ${scene?.openingLocation || '地点未设置'} · ${scene?.openingWeather || '天气未设置'}`,
+          `statusPanelIds: ${inspection.characters.map((item) => item.statusPanelId).filter(Boolean).join('、') || '无'}`,
           `narrativeSeedIds: ${seedIds.join('、') || '无'}`,
           `avatarTargets: ${missingAvatars.length ? `缺失 ${missingAvatars.join('、')}` : '全部已设置'}`,
           complete
@@ -387,6 +513,9 @@ export function createReadPlayableWorldBuildReceiptTool(
             session: 'durable',
             documentIds: 'durable',
             characters: 'durable',
+            characterGroups: 'durable',
+            scene: 'durable',
+            statusPanelIds: 'durable',
             narrativeSeeds: 'durable',
             presenceParticipantIds: 'durable',
             missing: 'searchable'
@@ -469,13 +598,21 @@ const SEED_PROPERTIES = {
   participantNames: { type: 'array', items: { type: 'string' }, description: '只填写本蓝图中的主要角色姓名。' }
 } as const
 
+const STATUS_FIELD_PROPERTIES = {
+  key: { type: 'string', description: '稳定英文 key，如 health、mood、inventory。' },
+  label: { type: 'string', description: '面向玩家的字段标题。' },
+  valueType: { type: 'string', enum: ['text', 'number', 'list'] },
+  unit: { type: 'string', description: '可选单位；没有则省略或留空。' },
+  description: { type: 'string', description: '字段含义与更新边界。' }
+} as const
+
 export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilderContext): ToolDefinition {
   // 同一 Agent turn 内失败后用完全相同蓝图续跑时，沿用已经通过的总确认；蓝图变更则必须重新确认。
   const confirmedBlueprints = new Set<string>()
   return {
     name: 'buildPlayableWorld',
     longRunning: true,
-    brief: '把一份完整蓝图落成可直接开玩的世界：文档库→至少三个正式角色→匹配或新建世界并挂文档→命名群聊并挂世界→全员在场→叙事种子→最后生成角色与群聊头像。调用前必须先成功读取 readPlayableWorldBuilderSkill；只弹一次总确认。各阶段先回读再补缺，可用完全相同蓝图安全续跑，禁止改走低层工具拼接。',
+    brief: '把一份完整蓝图落成可直接开玩的世界：文档库→至少三个正式角色并进入合适分组→匹配或新建世界并挂文档→命名群聊并挂世界→设置时间/地点/天气→全员在场与主要角色状态栏→叙事种子→最后生成头像。调用前必须先成功读取 readPlayableWorldBuilderSkill；只弹一次总确认。各阶段先回读再补缺，可用完全相同蓝图安全续跑。',
     schema: {
       type: 'object',
       additionalProperties: false,
@@ -499,9 +636,18 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
             properties: {
               name: { type: 'string' },
               brief: { type: 'string', description: '完整独立角色设定，至少 120 字。' },
-              avatarPrompt: { type: 'string', description: '正方形角色头像画面描述。' }
+              avatarPrompt: { type: 'string', description: '正方形角色头像画面描述。' },
+              groupName: { type: 'string', description: '角色应进入的有意义分组名称；不得使用默认/未分类。' },
+              status: {
+                type: 'object', additionalProperties: false,
+                properties: {
+                  description: { type: 'string', description: '该角色开场状态栏记录什么，至少 20 字。' },
+                  values: { type: 'object', description: '完整填写 statusPanel.fields 的每个 key，且不得添加模板外字段。' }
+                },
+                required: ['description', 'values']
+              }
             },
-            required: ['name', 'brief', 'avatarPrompt']
+            required: ['name', 'brief', 'avatarPrompt', 'groupName', 'status']
           }
         },
         world: {
@@ -518,16 +664,31 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
           properties: {
             title: { type: 'string' },
             openingLocation: { type: 'string', description: '大地点/中地点/小地点。' },
+            openingWeather: { type: 'string', description: '适合开场地点、氛围和冲突的明确天气。' },
+            openingTime: { type: 'string', description: '只有用户明确指定时间时填写 YYYY-MM-DDTHH:mm:ss；省略时工具使用执行瞬间的现实时间。' },
+            timeRate: { type: 'number', minimum: 0, maximum: 60, description: '只有用户明确指定流速时填写；省略时为 1 倍速。' },
             avatarPrompt: { type: 'string', description: '正方形群聊头像画面描述。' }
           },
-          required: ['title', 'openingLocation', 'avatarPrompt']
+          required: ['title', 'openingLocation', 'openingWeather', 'avatarPrompt']
+        },
+        statusPanel: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            name: { type: 'string', description: '世界专用的主要角色状态栏模板名。' },
+            description: { type: 'string', description: '模板用途说明，至少 20 字。' },
+            fields: {
+              type: 'array', minItems: STATUS_FIELD_MIN, maxItems: STATUS_FIELD_MAX,
+              items: { type: 'object', additionalProperties: false, properties: STATUS_FIELD_PROPERTIES, required: ['key', 'label', 'valueType'] }
+            }
+          },
+          required: ['name', 'description', 'fields']
         },
         narrativeSeeds: {
           type: 'array', minItems: SEED_MIN, maxItems: SEED_MAX,
           items: { type: 'object', additionalProperties: false, properties: SEED_PROPERTIES, required: Object.keys(SEED_PROPERTIES) }
         }
       },
-      required: ['library', 'characters', 'world', 'session', 'narrativeSeeds']
+      required: ['library', 'characters', 'world', 'session', 'statusPanel', 'narrativeSeeds']
     },
     validateArgs: validatePlayableWorldBlueprint,
     execute: async (call, execution) => {
@@ -547,6 +708,9 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
       let session: { sessionId: string; title: string } | null = null
       let seedIds: string[] = []
       let presenceParticipantIds: string[] = []
+      let characterGroups: PlayableWorldCharacterGroupReceipt[] = []
+      let scene: PlayableWorldSceneReceipt | null = null
+      let statusPanels: PlayableWorldStatusReceipt | null = null
       if (!confirmedBlueprints.has(blueprintKey)) {
         const initialWorlds = await context.provider.listWorlds()
         const initialMatch = resolvePlayableWorldMatch(initialWorlds, blueprint.world)
@@ -554,11 +718,12 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
           title: `一键创建可玩世界「${blueprint.world.name}」`,
           lines: [
             `文档库：${blueprint.library.title}（1 篇概览 + ${blueprint.library.documents.length} 篇文档）`,
-            `主要角色：${blueprint.characters.map((item) => item.name).join('、')}`,
+            `主要角色：${blueprint.characters.map((item) => `${item.name}→${item.groupName}`).join('、')}`,
             initialMatch
               ? `世界：复用「${initialMatch.world.name}」（${initialMatch.reason}）`
               : `世界：现有世界无可信匹配，将新建「${blueprint.world.name}」`,
-            `会话：${blueprint.session.title}；叙事种子：${blueprint.narrativeSeeds.length} 条`,
+            `会话：${blueprint.session.title}；开场：${blueprint.session.openingTime || '执行时现实时间'} / ${blueprint.session.timeRate ?? 1}x / ${blueprint.session.openingLocation} / ${blueprint.session.openingWeather}`,
+            `状态栏：模板「${blueprint.statusPanel.name}」+ ${blueprint.characters.length} 张主要角色状态栏；叙事种子：${blueprint.narrativeSeeds.length} 条`,
             `头像：${blueprint.characters.length} 个角色 + 1 个群聊；严格在全部内容完成后生成。`,
             '确认后连续执行；相同蓝图若因中断续跑，将复用既有正式内容且不再重复确认。'
           ]
@@ -619,6 +784,27 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
           message: `共 ${generatedCharacters.length} 个（复用 ${generatedCharacters.length - (missingCharacters.length - characterFailures.length)} 个，新建 ${missingCharacters.length - characterFailures.length} 个）${characterFailures.length ? `；失败 ${characterFailures.join('；')}` : ''}`
         })
 
+        currentStage = '归入角色分组'
+        const generatedByName = new Map(generatedCharacters.map((item) => [item.requestedName, item]))
+        const groupRequests = [...new Set(blueprint.characters.map((item) => item.groupName))].map((groupName) => ({
+          groupName,
+          characterIds: blueprint.characters
+            .filter((item) => item.groupName === groupName)
+            .flatMap((item) => {
+              const generated = generatedByName.get(item.name)
+              return generated ? [generated.id] : []
+            })
+        })).filter((item) => item.characterIds.length)
+        characterGroups = await context.provider.ensureCharacterGroups(groupRequests)
+        const groupedCharacterIds = unique(characterGroups.flatMap((item) => item.characterIds))
+        const ungroupedCharacterIds = generatedCharacters.map((item) => item.id).filter((id) => !groupedCharacterIds.includes(id))
+        if (ungroupedCharacterIds.length) throw new Error(`这些主要角色没有进入目标分组：${ungroupedCharacterIds.join('、')}`)
+        receipts.push({
+          stage: currentStage,
+          status: 'success',
+          message: characterGroups.map((item) => `${item.created ? '新建' : '复用'}「${item.name}」(${item.characterIds.length} 人)`).join('；')
+        })
+
         currentStage = '匹配或创建世界'
         const currentWorlds = await context.provider.listWorlds()
         const match = resolvePlayableWorldMatch(currentWorlds, blueprint.world)
@@ -653,6 +839,20 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
         if (attached.worldId !== world.id) throw new Error(`会话挂载回读不一致：${attached.worldId || '空'} ≠ ${world.id}`)
         receipts.push({ stage: currentStage, status: 'success', message: `${sessionReused ? '复用' : '新建'} ${session.title}（${session.sessionId}）→ ${world.name}` })
 
+        currentStage = '设置世界开场环境'
+        scene = await context.provider.configureSessionScene({
+          sessionId: session.sessionId,
+          worldId: world.id,
+          openingLocation: blueprint.session.openingLocation,
+          openingWeather: blueprint.session.openingWeather,
+          ...(text(blueprint.session.openingTime) ? { openingTime: text(blueprint.session.openingTime) } : {}),
+          ...(blueprint.session.timeRate !== undefined ? { timeRate: Number(blueprint.session.timeRate) } : {})
+        })
+        if (!scene.openingTime || !isThreePartLocation(scene.openingLocation) || !scene.openingWeather || !Number.isFinite(scene.timeRate)) {
+          throw new Error('开场环境回读不完整，必须同时设置时间、流速、三段地点和天气')
+        }
+        receipts.push({ stage: currentStage, status: 'success', message: `${scene.openingTime} · ${scene.timeRate}x · ${scene.openingLocation} · ${scene.openingWeather}` })
+
         currentStage = '设置全员在场'
         const presence = await context.provider.markCharactersPresent({
           sessionId: session.sessionId,
@@ -665,6 +865,24 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
         }
         presenceParticipantIds = unique(presence.participantIds)
         receipts.push({ stage: currentStage, status: 'success', message: `${generatedCharacters.length} 个角色均已在场` })
+
+        currentStage = '生成主要角色状态栏'
+        const blueprintCharacterByName = new Map(blueprint.characters.map((item) => [item.name, item]))
+        statusPanels = await context.provider.ensureCharacterStatusPanels({
+          sessionId: session.sessionId,
+          worldId: world.id,
+          template: blueprint.statusPanel,
+          characters: generatedCharacters.flatMap((item) => {
+            const source = blueprintCharacterByName.get(item.requestedName)
+            return source ? [{ ...item, status: source.status }] : []
+          })
+        })
+        const statusCharacterIds = unique(statusPanels.panels.map((item) => item.characterId))
+        const charactersMissingStatus = generatedCharacters.filter((item) => !statusCharacterIds.includes(item.id))
+        if (!statusPanels.templateId || charactersMissingStatus.length) {
+          throw new Error(`状态栏回执不完整${charactersMissingStatus.length ? `：缺少 ${charactersMissingStatus.map((item) => item.name).join('、')}` : ''}`)
+        }
+        receipts.push({ stage: currentStage, status: 'success', message: `模板 ${statusPanels.templateId} · ${statusPanels.panels.length} 张主要角色状态栏` })
 
         currentStage = '生成叙事种子'
         for (const seed of blueprint.narrativeSeeds) {
@@ -745,7 +963,10 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
           `documentIds: ${documentIds.join('、')}`,
           `mountedDocumentIds: ${mountedDocumentIds.join('、')}`,
           `characterIds: ${generatedCharacters.map((item) => `${item.name}=${item.id}`).join('、')}`,
+          `characterGroups: ${characterGroups.map((item) => `${item.name}=${item.id}[${item.characterIds.join(',')}]`).join('、')}`,
+          `scene: ${scene!.openingTime} · ${scene!.timeRate}x · ${scene!.openingLocation} · ${scene!.openingWeather}`,
           `presenceParticipantIds: ${presenceParticipantIds.join('、')}（全员 present）`,
+          `statusPanelIds: ${statusPanels!.panels.map((item) => `${item.characterId}=${item.panelId}`).join('、')}（templateId=${statusPanels!.templateId}）`,
           `narrativeSeedIds: ${seedIds.join('、')}`,
           `avatarTargets: ${avatarVerified.join('、')}${avatarFailures.length ? `；失败 ${avatarFailures.map((item) => item.target).join('、')}` : '（全部已设置）'}`
         ].join('\n')
@@ -760,8 +981,11 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
             documentIds,
             mountedDocumentIds,
             characters: generatedCharacters,
+            characterGroups,
             session: { id: session.sessionId, title: session.title },
+            scene,
             presenceParticipantIds,
+            statusPanels,
             seedIds,
             avatarVerified,
             avatarSucceeded,
@@ -772,8 +996,11 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
             documentIds: 'durable',
             mountedDocumentIds: 'durable',
             characters: 'durable',
+            characterGroups: 'durable',
             session: 'durable',
+            scene: 'durable',
             presenceParticipantIds: 'durable',
+            statusPanels: 'durable',
             seedIds: 'durable',
             avatarFailures: 'transient',
             receipts: 'searchable'
@@ -791,9 +1018,12 @@ export function createBuildPlayableWorldTool(context: XingyiPlayableWorldBuilder
             documentIds,
             mountedDocumentIds,
             characters: generatedCharacters,
+            characterGroups,
             world: world ? { id: world.id, name: world.name, resolution: worldResolution } : null,
             session: session ? { id: session.sessionId, title: session.title } : null,
+            scene,
             presenceParticipantIds,
+            statusPanels,
             seedIds,
             receipts
           },

@@ -76,6 +76,6 @@ export const xingyi = {
     resumeDesc: 'Browse and restore past conversations',
     modelDesc: 'Switch this conversation model and reasoning effort',
     diaryDesc: 'Generate today’s Xingyi diary',
-    buildWorldDesc: 'Build a complete playable world, with avatars generated last'
+    buildWorldDesc: 'Build a playable world with grouped roles, opening scene, status panels, and avatars generated last'
   }
 }

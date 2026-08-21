@@ -413,6 +413,7 @@ import type { XingyiAvatarCropPreset } from '../../app/xingyiConversationAvatarT
 import { createXingyiBatchCharacterProvider } from '../../app/xingyiBatchCharacterProvider'
 import type { XingyiConversationMember } from '../../app/xingyiConversationMemberTools'
 import { createXingyiPlayableWorldDocumentLibrary } from '../../app/xingyiPlayableWorldDocumentLibrary'
+import { createCurtainTimeFlowPatch, formatLocalCurtainTime } from './script/curtainSettings'
 import type { XingyiWriteConfirmRequest } from '../../app/xingyiFunctionTools'
 import type { XingyiAskUserRequest } from '../../app/xingyiAskUserTool'
 import type { XingyiStatusScopeRequest, XingyiStatusScopeSelection } from '../../app/xingyiStatusScopeTool'
@@ -452,6 +453,8 @@ import {
   fetchChatSessionCharacterPresence,
   fetchNarrativeSeeds,
   fetchNarrativeSeedDetail,
+  fetchStatusPanelTemplates,
+  fetchStatusPanels,
   fetchOrchestrationWorkspaceProjection,
   fetchWorldDetail,
   createNarrativeSeed,
@@ -469,6 +472,8 @@ import {
   normalizeChatSessionCharacterParticipants,
   attachSessionWorld,
   saveWorldDocLinks,
+  saveStatusPanelTemplate,
+  saveStatusPanel,
   setChatSessionCharacterPresence,
   saveChatSessionPatchById,
   // 带图乐观发送（2026-07-11）：caption 后台补全完成后，用它把合并好的完整附件数组整体回填落库消息。
@@ -2881,6 +2886,37 @@ async function runXingyiTurn(
           const existing = matches[0]
           return existing ? { id: String(existing.id), name: String(existing.name || name), requestedName: name } : null
         },
+        ensureCharacterGroups: async (requests) => {
+          const receipts = []
+          for (const request of requests) {
+            const groupName = String(request.groupName || '').trim()
+            const matches = (charStore.characterGroups || []).filter((group) => String(group?.name || '').trim() === groupName)
+            if (matches.length > 1) throw new Error(`已有 ${matches.length} 个同名角色分组「${groupName}」，无法安全续建`)
+            let group: { id: string; name: string; emoji?: string; orderIndex?: number } | null = matches[0] || null
+            let created = false
+            if (!group) {
+              const groupId = `character_group_world_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+              await charStore.addCharGroup({ id: groupId, name: groupName, emoji: '组' })
+              group = (charStore.characterGroups || []).find((item) => String(item.id) === groupId) || null
+              created = true
+            }
+            if (!group || String(group.id) === 'default') throw new Error(`无法创建或解析正式角色分组「${groupName}」`)
+            const groupId = String(group.id)
+            for (const characterId of request.characterIds) {
+              const character = charStore.getCharacter(characterId) as Record<string, unknown> | null
+              const currentGroupId = String(character?.groupId ?? character?.group_id ?? 'default')
+              if (currentGroupId !== groupId) {
+                await charStore.updateCharacter(characterId, { groupId, group_id: groupId } as never)
+              }
+            }
+            const assignedIds = request.characterIds.filter((characterId) => {
+              const character = charStore.getCharacter(characterId) as Record<string, unknown> | null
+              return String(character?.groupId ?? character?.group_id ?? '') === groupId
+            })
+            receipts.push({ id: groupId, name: groupName, created, characterIds: assignedIds })
+          }
+          return receipts
+        },
         listWorlds: async () => (await fetchWorlds()).map((world) => ({
           id: String(world.id || ''),
           name: String(world.name || ''),
@@ -2940,6 +2976,42 @@ async function runXingyiTurn(
           await chatStore.switchSession?.(targetSessionId)
           return { worldId: String(attached.world?.id || attached.session?.worldId || '') }
         },
+        configureSessionScene: async ({ sessionId: targetSessionId, worldId, openingLocation, openingWeather, openingTime, timeRate }) => {
+          const [locationLarge, locationMiddle, locationSmall] = String(openingLocation || '').split('/').map((item) => item.trim())
+          if (!locationLarge || !locationMiddle || !locationSmall) throw new Error('开场地点必须是完整的大地点/中地点/小地点')
+          const effectiveTime = String(openingTime || '').trim() || formatLocalCurtainTime(new Date())
+          const timePatch = createCurtainTimeFlowPatch(effectiveTime, timeRate ?? 1)
+          const sceneChanges = {
+            virtualSceneName: locationSmall,
+            virtualSceneDesc: `世界 ${worldId} 的开场场景：${openingLocation}；天气：${openingWeather}`,
+            virtualSceneWorldId: worldId,
+            virtualLocationLarge: locationLarge,
+            virtualLocationMiddle: locationMiddle,
+            virtualLocationSmall: locationSmall,
+            virtualLocation: openingLocation,
+            ...timePatch,
+            virtualWeather: openingWeather,
+            virtualWeatherMode: 'custom'
+          }
+          const scenePatch = buildChatSessionPatch(sceneChanges)
+          if (getChatStoreActiveSessionId(chatStore) === targetSessionId) {
+            await chatStore.updateSession(targetSessionId, sceneChanges)
+          } else {
+            await saveChatSessionPatchById(targetSessionId, scenePatch)
+          }
+          const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
+          const saved = (bundle?.session || {}) as unknown as Record<string, unknown>
+          return {
+            openingTime: String(saved.virtualTime ?? saved.virtual_time ?? ''),
+            timeRate: Number(saved.virtualTimeRate ?? saved.virtual_time_rate ?? NaN),
+            openingLocation: [
+              saved.virtualLocationLarge ?? saved.virtual_location_large,
+              saved.virtualLocationMiddle ?? saved.virtual_location_middle,
+              saved.virtualLocationSmall ?? saved.virtual_location_small
+            ].map((item) => String(item || '').trim()).filter(Boolean).join('/'),
+            openingWeather: String(saved.virtualWeather ?? saved.virtual_weather ?? '')
+          }
+        },
         markCharactersPresent: async ({ sessionId: targetSessionId, worldId, characterIds, locationText }) => {
           const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
           const participantRows = Array.isArray(bundle?.participants)
@@ -2977,6 +3049,64 @@ async function runXingyiTurn(
             .filter((item) => expectedParticipantIds.includes(item.participantId) && item.presenceState === 'present')
             .map((item) => item.participantId)
           return { participantIds: presentParticipantIds }
+        },
+        ensureCharacterStatusPanels: async ({ sessionId: targetSessionId, template, characters }) => {
+          const templateMatches = (await fetchStatusPanelTemplates(targetSessionId))
+            .filter((item) => String(item.name || '').trim() === template.name.trim())
+          if (templateMatches.length > 1) throw new Error(`已有 ${templateMatches.length} 个同名状态栏模板「${template.name}」，无法安全续建`)
+          let savedTemplate = templateMatches[0]
+          if (savedTemplate) {
+            const existingShape = savedTemplate.fields.map((field) => `${field.key}:${field.valueType}`).join('|')
+            const requestedShape = template.fields.map((field) => `${field.key}:${field.valueType}`).join('|')
+            if (existingShape !== requestedShape || String(savedTemplate.kind || '') !== 'character') {
+              throw new Error(`同名状态栏模板「${template.name}」已存在，但字段结构或分类不同；请为本世界换一个专用模板名`)
+            }
+          } else {
+            savedTemplate = await saveStatusPanelTemplate(targetSessionId, {
+              name: template.name,
+              kind: 'character',
+              description: template.description,
+              fields: template.fields,
+              createdBy: 'agent',
+              expectedVersion: 0
+            } as never)
+          }
+          const bundle = await fetchChatSessionBundleById(targetSessionId, { limit: 1 })
+          const participantRows = Array.isArray(bundle?.participants)
+            ? bundle.participants
+            : Array.isArray(bundle?.session?.participants) ? bundle.session.participants : []
+          const participantByCharacterId = new Map(
+            normalizeChatSessionCharacterParticipants({ participants: participantRows })
+              .map((item) => [item.characterId, item.participantId] as const)
+          )
+          let panels = await fetchStatusPanels(targetSessionId)
+          const panelReceipts = []
+          for (const character of characters) {
+            const participantId = String(participantByCharacterId.get(character.id) || '').trim()
+            if (!participantId) throw new Error(`主要角色「${character.name}」缺少正式 participantId，不能挂状态栏`)
+            const exactHostPanels = panels.filter((panel) => panel.hostType === 'session_character' && panel.hostId === participantId)
+            const matching = exactHostPanels.filter((panel) => panel.templateId === savedTemplate.id)
+            if (matching.length > 1) throw new Error(`角色「${character.name}」已有 ${matching.length} 张同模板状态栏，无法安全续建`)
+            let panel = matching[0]
+            if (!panel) {
+              const nameCollision = panels.find((item) => item.name === character.name && (item.hostId !== participantId || item.templateId !== savedTemplate.id))
+              if (nameCollision) throw new Error(`状态栏名称「${character.name}」已被其他宿主或模板使用，无法安全续建`)
+              panel = await saveStatusPanel(targetSessionId, {
+                templateId: savedTemplate.id,
+                name: character.name,
+                description: character.status.description,
+                hostType: 'session_character',
+                hostId: participantId,
+                values: character.status.values,
+                expectedVersion: 0,
+                idempotencyKey: `playable-world:${targetSessionId}:${participantId}:status-panel`,
+                source: 'xingyi_playable_world_builder'
+              } as never)
+              panels = [...panels, panel]
+            }
+            panelReceipts.push({ characterId: character.id, panelId: panel.id })
+          }
+          return { templateId: savedTemplate.id, panels: panelReceipts }
         },
         createNarrativeSeed: async (worldId, input) => {
           const created = await createNarrativeSeed(worldId, input)
@@ -3066,16 +3196,23 @@ async function runXingyiTurn(
             : Array.isArray(bundle?.session?.participants) ? bundle.session.participants : []
           const participants = normalizeChatSessionCharacterParticipants({ participants: participantRows })
           const presence = await fetchChatSessionCharacterPresence(targetSessionId)
+          const statusPanels = await fetchStatusPanels(targetSessionId)
           const presenceByParticipantId = new Map(presence.items.map((item) => [item.participantId, item.presenceState]))
           const characters = participants.map((participant) => {
             const character = charStore.getCharacter(participant.characterId) as Record<string, unknown> | null
             const participantId = String(participant.participantId || '').trim()
+            const groupId = String(character?.groupId ?? character?.group_id ?? '').trim()
+            const groupName = String((charStore.characterGroups || []).find((group) => String(group.id) === groupId)?.name || '').trim()
+            const matchingStatusPanels = statusPanels.filter((panel) => panel.hostType === 'session_character' && panel.hostId === participantId)
             return {
               id: participant.characterId,
               name: String(character?.name || participant.characterId),
               participantId,
               presenceState: participantId ? String(presenceByParticipantId.get(participantId) || 'unknown') : 'unknown',
-              avatarReady: Boolean(String(character?.avatarPath ?? character?.avatar_path ?? '').trim())
+              avatarReady: Boolean(String(character?.avatarPath ?? character?.avatar_path ?? '').trim()),
+              groupId,
+              groupName,
+              statusPanelId: String(matchingStatusPanels[0]?.id || '')
             }
           })
           const seeds = await fetchNarrativeSeeds(worldId)
@@ -3091,7 +3228,17 @@ async function runXingyiTurn(
               id: targetSessionId,
               title: String(bundle?.session?.title || matchedSession.name || targetSessionId),
               worldId: sessionWorldId,
-              avatarReady: Boolean(sessionAvatarPath)
+              avatarReady: Boolean(sessionAvatarPath),
+              scene: {
+                openingTime: String(bundle?.session?.virtualTime ?? bundle?.session?.virtual_time ?? ''),
+                timeRate: Number(bundle?.session?.virtualTimeRate ?? bundle?.session?.virtual_time_rate ?? NaN),
+                openingLocation: [
+                  bundle?.session?.virtualLocationLarge ?? bundle?.session?.virtual_location_large,
+                  bundle?.session?.virtualLocationMiddle ?? bundle?.session?.virtual_location_middle,
+                  bundle?.session?.virtualLocationSmall ?? bundle?.session?.virtual_location_small
+                ].map((item) => String(item || '').trim()).filter(Boolean).join('/'),
+                openingWeather: String(bundle?.session?.virtualWeather ?? bundle?.session?.virtual_weather ?? '')
+              }
             },
             documentIds: [...new Set(detail.docLinks.map((id) => String(id || '').trim()).filter(Boolean))],
             characters,

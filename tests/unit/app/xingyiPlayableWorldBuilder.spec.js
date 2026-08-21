@@ -31,7 +31,12 @@ function blueprint() {
     characters: names.map((name, index) => ({
       name,
       brief: `${name}是第${index + 1}位主要角色，拥有明确目标、秘密、能力限制、说话习惯、与其他角色的张力，以及能在开场立刻采取的行动。`.repeat(5),
-      avatarPrompt: `${name}的日式奇幻动画头像，雾海群岛服装，独特发色与饰物，柔和电影光线，神态鲜明。`
+      avatarPrompt: `${name}的日式奇幻动画头像，雾海群岛服装，独特发色与饰物，柔和电影光线，神态鲜明。`,
+      groupName: '雾海星炉远征队',
+      status: {
+        description: `${name}在末班飞空艇启航前的即时行动状态，供后续剧情回合持续更新。`,
+        values: { vitality: 90 - index * 5, mood: ['警觉', '冷静', '期待'][index], inventory: [`星砂凭证${index + 1}`] }
+      }
     })),
     world: {
       name: '雾海星炉群岛',
@@ -41,7 +46,17 @@ function blueprint() {
     session: {
       title: '星炉熄灭前的最后一班船',
       openingLocation: '雾海群岛/白汐港/末班飞空艇甲板',
+      openingWeather: '薄雾中夹着细雨，东风逐渐增强',
       avatarPrompt: '三名冒险者站在星炉与飞空艇前的群像徽章，蓝金配色，日式奇幻动画风格。'
+    },
+    statusPanel: {
+      name: '雾海星炉主要角色状态',
+      description: '记录主要角色在雾海冒险中会直接影响选择与行动结果的动态开场状态。',
+      fields: [
+        { key: 'vitality', label: '体力', valueType: 'number', unit: '%' },
+        { key: 'mood', label: '情绪', valueType: 'text' },
+        { key: 'inventory', label: '随身物品', valueType: 'list' }
+      ]
     },
     narrativeSeeds: [
       {
@@ -143,18 +158,33 @@ describe('xingyiPlayableWorldBuilder', () => {
     const tooFewDocs = blueprint()
     tooFewDocs.library.documents.pop()
     expect(validatePlayableWorldBlueprint(tooFewDocs)).toContain('5～12')
+
+    const missingWeather = blueprint()
+    missingWeather.session.openingWeather = ''
+    expect(validatePlayableWorldBlueprint(missingWeather)).toContain('开场天气')
+
+    const defaultGroup = blueprint()
+    defaultGroup.characters[0].groupName = '默认'
+    expect(validatePlayableWorldBlueprint(defaultGroup)).toContain('非默认分组')
+
+    const missingStatusValue = blueprint()
+    delete missingStatusValue.characters[0].status.values.mood
+    expect(validatePlayableWorldBlueprint(missingStatusValue)).toContain('缺少字段「mood」')
   })
 
   it('只读验收工具把历史世界的全部正式 ID 和完成状态直接返回给模型', async () => {
     const provider = {
       inspectBuild: vi.fn(async () => ({
         world: { id: 'world_1', name: '雾海星炉群岛' },
-        session: { id: 'session_1', title: '星炉熄灭前的最后一班船', worldId: 'world_1', avatarReady: true },
+        session: {
+          id: 'session_1', title: '星炉熄灭前的最后一班船', worldId: 'world_1', avatarReady: true,
+          scene: { openingTime: '2026-08-21T12:00:00', timeRate: 1, openingLocation: '雾海群岛/白汐港/末班飞空艇甲板', openingWeather: '薄雾细雨' }
+        },
         documentIds: ['overview', 'doc_1', 'doc_2', 'doc_3', 'doc_4', 'doc_5'],
         characters: [
-          { id: 'char_1', name: '千羽澪', participantId: 'participant_1', presenceState: 'present', avatarReady: true },
-          { id: 'char_2', name: '神代朔', participantId: 'participant_2', presenceState: 'present', avatarReady: true },
-          { id: 'char_3', name: '雨宫灯', participantId: 'participant_3', presenceState: 'present', avatarReady: true }
+          { id: 'char_1', name: '千羽澪', participantId: 'participant_1', presenceState: 'present', avatarReady: true, groupId: 'group_1', groupName: '雾海星炉远征队', statusPanelId: 'panel_1' },
+          { id: 'char_2', name: '神代朔', participantId: 'participant_2', presenceState: 'present', avatarReady: true, groupId: 'group_1', groupName: '雾海星炉远征队', statusPanelId: 'panel_2' },
+          { id: 'char_3', name: '雨宫灯', participantId: 'participant_3', presenceState: 'present', avatarReady: true, groupId: 'group_1', groupName: '雾海星炉远征队', statusPanelId: 'panel_3' }
         ],
         narrativeSeeds: [{ id: 'seed_1', title: '主星炉即将熄灭' }, { id: 'seed_2', title: '末班船上的第四张票' }]
       }))
@@ -169,6 +199,8 @@ describe('xingyiPlayableWorldBuilder', () => {
     expect(result.content).toContain('worldId: world_1')
     expect(result.content).toContain('sessionId: session_1')
     expect(result.content).toContain('presenceParticipantIds: participant_1、participant_2、participant_3（全员 present）')
+    expect(result.content).toContain('characterGroups: 千羽澪→雾海星炉远征队')
+    expect(result.content).toContain('statusPanelIds: panel_1、panel_2、panel_3')
     expect(result.content).toContain('请把相关 TODO 标为完成')
   })
 
@@ -176,10 +208,13 @@ describe('xingyiPlayableWorldBuilder', () => {
     const tool = createReadPlayableWorldBuildReceiptTool({
       inspectBuild: vi.fn(async () => ({
         world: { id: 'world_1', name: '雾海星炉群岛' },
-        session: { id: 'session_1', title: '末班船', worldId: '', avatarReady: false },
+        session: {
+          id: 'session_1', title: '末班船', worldId: '', avatarReady: false,
+          scene: { openingTime: '', timeRate: Number.NaN, openingLocation: '', openingWeather: '' }
+        },
         documentIds: ['overview'],
         characters: [
-          { id: 'char_1', name: '千羽澪', participantId: 'participant_1', presenceState: 'absent', avatarReady: false }
+          { id: 'char_1', name: '千羽澪', participantId: 'participant_1', presenceState: 'absent', avatarReady: false, groupId: 'default', groupName: '默认', statusPanelId: '' }
         ],
         narrativeSeeds: []
       }))
@@ -190,6 +225,9 @@ describe('xingyiPlayableWorldBuilder', () => {
     expect(result.details).toMatchObject({ complete: false, verificationStatus: 'incomplete' })
     expect(result.content).toContain('会话未挂载到目标世界')
     expect(result.content).toContain('未确认在场：千羽澪')
+    expect(result.content).toContain('未进入正式角色分组：千羽澪')
+    expect(result.content).toContain('未设置开场时间')
+    expect(result.content).toContain('缺少主要角色状态栏：千羽澪')
     expect(result.content).toContain('头像未设置')
   })
 
@@ -205,6 +243,10 @@ describe('xingyiPlayableWorldBuilder', () => {
         return { ok: true, characterId: `char_${requestedName}`, name: requestedName, message: 'ok' }
       }),
       findCharacterByName: vi.fn(async () => null),
+      ensureCharacterGroups: vi.fn(async (requests) => {
+        events.push('character-groups')
+        return requests.map((request) => ({ id: 'group_1', name: request.groupName, created: true, characterIds: request.characterIds }))
+      }),
       listWorlds: vi.fn(async () => [{ id: 'world_existing', name: '雾海星炉群岛', description: '既有世界' }]),
       createWorld: vi.fn(async () => { throw new Error('不应新建世界') }),
       readWorldDocumentIds: vi.fn(async () => ['old_doc']),
@@ -212,7 +254,15 @@ describe('xingyiPlayableWorldBuilder', () => {
       createConversation: vi.fn(async ({ title }) => { events.push('conversation'); return { sessionId: 'session_1', title } }),
       findConversation: vi.fn(async () => null),
       attachSessionToWorld: vi.fn(async () => { events.push('attach-world'); return { worldId: 'world_existing' } }),
+      configureSessionScene: vi.fn(async ({ openingLocation, openingWeather, timeRate }) => {
+        events.push('scene')
+        return { openingTime: '2026-08-21T12:00:00', timeRate: timeRate ?? 1, openingLocation, openingWeather }
+      }),
       markCharactersPresent: vi.fn(async ({ characterIds }) => { events.push('presence'); return { participantIds: characterIds.map((id) => `participant_${id}`) } }),
+      ensureCharacterStatusPanels: vi.fn(async ({ characters }) => {
+        events.push('status-panels')
+        return { templateId: 'template_1', panels: characters.map((character) => ({ characterId: character.id, panelId: `panel_${character.id}` })) }
+      }),
       createNarrativeSeed: vi.fn(async (_worldId, seed) => { events.push(`seed:${seed.title}`); return { id: `seed_${events.length}` } }),
       findNarrativeSeedByTitle: vi.fn(async () => null),
       hasCharacterAvatar: vi.fn(async () => false),
@@ -235,15 +285,30 @@ describe('xingyiPlayableWorldBuilder', () => {
     expect(result.content).toContain('【正式完成回执｜本工具已回读验收')
     expect(result.content).toContain('verificationStatus: verified_complete')
     expect(result.content).toContain('worldId: world_existing')
+    expect(result.content).toContain('characterGroups: 雾海星炉远征队=group_1')
+    expect(result.content).toContain('statusPanelIds: char_千羽澪=panel_char_千羽澪')
     expect(result.content).toContain('请直接把相关 TODO 标为完成')
     expect(provider.createWorld).not.toHaveBeenCalled()
     expect(confirmWrite).toHaveBeenCalledTimes(1)
     expect(provider.markCharactersPresent).toHaveBeenCalledWith(expect.objectContaining({
       characterIds: ['char_千羽澪', 'char_神代朔', 'char_雨宫灯']
     }))
+    expect(provider.ensureCharacterGroups).toHaveBeenCalledWith([{
+      groupName: '雾海星炉远征队',
+      characterIds: ['char_千羽澪', 'char_神代朔', 'char_雨宫灯']
+    }])
+    expect(provider.configureSessionScene).toHaveBeenCalledWith(expect.objectContaining({
+      openingLocation: '雾海群岛/白汐港/末班飞空艇甲板',
+      openingWeather: '薄雾中夹着细雨，东风逐渐增强'
+    }))
+    expect(provider.configureSessionScene.mock.calls[0][0]).not.toHaveProperty('openingTime')
+    expect(provider.configureSessionScene.mock.calls[0][0]).not.toHaveProperty('timeRate')
+    expect(provider.ensureCharacterStatusPanels).toHaveBeenCalledTimes(1)
     const lastSeedIndex = Math.max(...events.map((event, index) => event.startsWith('seed:') ? index : -1))
     const firstAvatarIndex = events.findIndex((event) => event.startsWith('avatar:'))
-    expect(lastSeedIndex).toBeGreaterThan(events.indexOf('presence'))
+    expect(events.indexOf('scene')).toBeGreaterThan(events.indexOf('attach-world'))
+    expect(events.indexOf('status-panels')).toBeGreaterThan(events.indexOf('presence'))
+    expect(lastSeedIndex).toBeGreaterThan(events.indexOf('status-panels'))
     expect(firstAvatarIndex).toBeGreaterThan(lastSeedIndex)
     expect(provider.assignCharacterAvatar).toHaveBeenCalledTimes(3)
     expect(provider.assignSessionAvatar).toHaveBeenCalledTimes(1)
@@ -262,6 +327,7 @@ describe('xingyiPlayableWorldBuilder', () => {
       })),
       findCharacterByName: vi.fn(async (name) => characters.find((character) => character.name === name) || null),
       generateCharacter: vi.fn(),
+      ensureCharacterGroups: vi.fn(async (requests) => requests.map((request) => ({ id: 'group_1', name: request.groupName, created: false, characterIds: request.characterIds }))),
       listWorlds: vi.fn(async () => [{ id: 'world_1', name: data.world.name, description: data.world.description }]),
       createWorld: vi.fn(),
       readWorldDocumentIds: vi.fn(async () => ['overview', ...data.library.documents.map((_, index) => `doc_${index}`)]),
@@ -269,7 +335,9 @@ describe('xingyiPlayableWorldBuilder', () => {
       findConversation: vi.fn(async () => ({ sessionId: 'session_1', title: data.session.title })),
       createConversation: vi.fn(),
       attachSessionToWorld: vi.fn(async () => ({ worldId: 'world_1' })),
+      configureSessionScene: vi.fn(async ({ openingLocation, openingWeather, timeRate }) => ({ openingTime: '2026-08-21T12:00:00', timeRate: timeRate ?? 1, openingLocation, openingWeather })),
       markCharactersPresent: vi.fn(async () => ({ participantIds: ['p1', 'p2', 'p3'] })),
+      ensureCharacterStatusPanels: vi.fn(async ({ characters }) => ({ templateId: 'template_1', panels: characters.map((character) => ({ characterId: character.id, panelId: `panel_${character.id}` })) })),
       findNarrativeSeedByTitle: vi.fn(async (_worldId, title) => ({ id: `seed_${title}` })),
       createNarrativeSeed: vi.fn(),
       hasCharacterAvatar: vi.fn(async () => true),
@@ -303,6 +371,7 @@ describe('xingyiPlayableWorldBuilder', () => {
       }),
       findCharacterByName: vi.fn(async (name) => ({ id: `char_${name}`, name, requestedName: name })),
       generateCharacter: vi.fn(),
+      ensureCharacterGroups: vi.fn(async (requests) => requests.map((request) => ({ id: 'group_1', name: request.groupName, created: false, characterIds: request.characterIds }))),
       listWorlds: vi.fn(async () => [{ id: 'world_1', name: data.world.name, description: '' }]),
       createWorld: vi.fn(),
       readWorldDocumentIds: vi.fn(async () => []),
@@ -310,7 +379,9 @@ describe('xingyiPlayableWorldBuilder', () => {
       findConversation: vi.fn(async () => ({ sessionId: 'session_1', title: data.session.title })),
       createConversation: vi.fn(),
       attachSessionToWorld: vi.fn(async () => ({ worldId: 'world_1' })),
+      configureSessionScene: vi.fn(async ({ openingLocation, openingWeather, timeRate }) => ({ openingTime: '2026-08-21T12:00:00', timeRate: timeRate ?? 1, openingLocation, openingWeather })),
       markCharactersPresent: vi.fn(async () => ({ participantIds: ['p1', 'p2', 'p3'] })),
+      ensureCharacterStatusPanels: vi.fn(async ({ characters }) => ({ templateId: 'template_1', panels: characters.map((character) => ({ characterId: character.id, panelId: `panel_${character.id}` })) })),
       findNarrativeSeedByTitle: vi.fn(async (_worldId, title) => ({ id: `seed_${title}` })),
       createNarrativeSeed: vi.fn(),
       hasCharacterAvatar: vi.fn(async () => true),

@@ -87,7 +87,7 @@ export const AGENT_SKILL_CATALOG = {
   },
   'xingyi.playable-world-builder': {
     id: 'xingyi.playable-world-builder', title: '星依一键开玩世界',
-    description: '从一句话连续构造文档库、主要角色、世界、群聊、全员在场、叙事种子与最后头像。',
+    description: '从一句话连续构造文档库、分组主要角色、世界、群聊、开场时间地点天气、角色状态栏、叙事种子与最后头像。',
     bodySource: 'docs/agents/星依/skills/playable-world-builder/SKILL.md', residentBodyLayer: '0', onDemandDirectoryLayer: '1', onDemandBodyLayer: '4'
   },
   'xingyi.relation-hint-authoring': {
